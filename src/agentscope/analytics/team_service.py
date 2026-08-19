@@ -181,9 +181,7 @@ class TeamAnalyticsService:
             output_tokens=int(tokens["output_tokens"] or 0),
             total_tokens=int(tokens["total_tokens"] or 0),
             observed_cost_usd=self._nullable_float(costs, "observed_cost_usd"),
-            estimated_raw_cost_usd=self._nullable_float(
-                costs, "estimated_raw_cost_usd"
-            ),
+            estimated_raw_cost_usd=self._nullable_float(costs, "estimated_raw_cost_usd"),
             total_savings_usd=savings,
         )
 
@@ -215,16 +213,10 @@ class TeamAnalyticsService:
         return [dict(row) for row in rows]
 
     def by_user(self) -> list[dict[str, Any]]:
-        return self._usage_by(
-            "COALESCE(u.display_name, u.stable_key, '(unknown)')",
-            "user",
-        )
+        return self._usage_by("COALESCE(u.display_name, u.stable_key, '(unknown)')", "user")
 
     def by_machine(self) -> list[dict[str, Any]]:
-        return self._usage_by(
-            "COALESCE(mc.display_name, mc.stable_key, '(unknown)')",
-            "machine",
-        )
+        return self._usage_by("COALESCE(mc.display_name, mc.stable_key, '(unknown)')", "machine")
 
     def by_project(self) -> list[dict[str, Any]]:
         return self._usage_by("COALESCE(p.name, '(unknown)')", "project")
@@ -233,10 +225,7 @@ class TeamAnalyticsService:
         return self._usage_by("src.name", "source")
 
     def by_model(self) -> list[dict[str, Any]]:
-        return self._usage_by(
-            "COALESCE(tm.name, sm.name, '(unknown)')",
-            "model",
-        )
+        return self._usage_by("COALESCE(tm.name, sm.name, '(unknown)')", "model")
 
     def by_day(self) -> list[dict[str, Any]]:
         where, params = self._where(date_expression="tu.timestamp")
@@ -269,9 +258,7 @@ class TeamAnalyticsService:
         where, params = self._where(
             date_expression="COALESCE(c.period_start, s.started_at)",
             model_expression="COALESCE(cm.name, sm.name)",
-            required=[
-                "(c.observed_cost_usd IS NOT NULL OR c.estimated_raw_cost_usd IS NOT NULL)"
-            ],
+            required=["(c.observed_cost_usd IS NOT NULL OR c.estimated_raw_cost_usd IS NOT NULL)"],
         )
         with self.repository.database.connect() as conn:
             rows = conn.execute(
@@ -297,9 +284,7 @@ class TeamAnalyticsService:
         return [dict(row) for row in rows]
 
     def cost_by_user(self) -> list[dict[str, Any]]:
-        return self._cost_by(
-            "COALESCE(u.display_name, u.stable_key, '(unknown)')", "user"
-        )
+        return self._cost_by("COALESCE(u.display_name, u.stable_key, '(unknown)')", "user")
 
     def cost_by_project(self) -> list[dict[str, Any]]:
         return self._cost_by("COALESCE(p.name, '(unknown)')", "project")
@@ -308,9 +293,7 @@ class TeamAnalyticsService:
         return self._cost_by("src.name", "source")
 
     def cost_by_model(self) -> list[dict[str, Any]]:
-        return self._cost_by(
-            "COALESCE(cm.name, sm.name, '(unknown)')", "model"
-        )
+        return self._cost_by("COALESCE(cm.name, sm.name, '(unknown)')", "model")
 
     def _savings_by(self, expression: str, alias: str) -> list[dict[str, Any]]:
         where, params = self._where(
@@ -329,22 +312,16 @@ class TeamAnalyticsService:
                 ),
                 optimizer_savings AS (
                     SELECT session_id,
-                           SUM(
-                               COALESCE(compression_savings_usd, 0) +
-                               COALESCE(cache_savings_usd, 0)
-                           ) AS savings
+                           SUM(COALESCE(compression_savings_usd, 0) +
+                               COALESCE(cache_savings_usd, 0)) AS savings
                     FROM optimizations
                     WHERE compression_savings_usd IS NOT NULL
                        OR cache_savings_usd IS NOT NULL
                     GROUP BY session_id
                 )
                 SELECT {expression} AS {alias},
-                       SUM(
-                           CASE
-                               WHEN cs.savings IS NOT NULL THEN cs.savings
-                               ELSE os.savings
-                           END
-                       ) AS total_savings_usd
+                       SUM(CASE WHEN cs.savings IS NOT NULL THEN cs.savings ELSE os.savings END)
+                           AS total_savings_usd
                 FROM sessions s
                 JOIN sources src ON src.id=s.source_id
                 LEFT JOIN projects p ON p.id=s.project_id
@@ -362,9 +339,7 @@ class TeamAnalyticsService:
         return [dict(row) for row in rows]
 
     def savings_by_user(self) -> list[dict[str, Any]]:
-        return self._savings_by(
-            "COALESCE(u.display_name, u.stable_key, '(unknown)')", "user"
-        )
+        return self._savings_by("COALESCE(u.display_name, u.stable_key, '(unknown)')", "user")
 
     def savings_by_project(self) -> list[dict[str, Any]]:
         return self._savings_by("COALESCE(p.name, '(unknown)')", "project")
@@ -374,3 +349,130 @@ class TeamAnalyticsService:
 
     def savings_by_model(self) -> list[dict[str, Any]]:
         return self._savings_by("COALESCE(sm.name, '(unknown)')", "model")
+
+    def data_quality(self) -> dict[str, Any]:
+        session_where, session_params = self._where(
+            date_expression="s.started_at",
+            model_expression="sm.name",
+        )
+        token_where, token_params = self._where(date_expression="tu.timestamp")
+        optimization_where, optimization_params = self._where(
+            date_expression="op.timestamp",
+            model_expression="COALESCE(om.name, sm.name)",
+        )
+
+        with self.repository.database.connect() as conn:
+            identity_rows = conn.execute(
+                """
+                SELECT COALESCE(u.identity_confidence, 'unknown') AS confidence,
+                       COUNT(DISTINCT u.id) AS users
+                FROM sessions s
+                JOIN sources src ON src.id=s.source_id
+                LEFT JOIN projects p ON p.id=s.project_id
+                LEFT JOIN models sm ON sm.id=s.model_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
+                """ + session_where + """
+                GROUP BY COALESCE(u.identity_confidence, 'unknown')
+                ORDER BY confidence
+                """,
+                session_params,
+            ).fetchall()
+            model_tokens = conn.execute(
+                """
+                SELECT COALESCE(SUM(tu.total_tokens), 0) AS total_tokens,
+                       COALESCE(SUM(
+                           CASE WHEN tu.model_id IS NULL AND s.model_id IS NULL
+                                THEN tu.total_tokens ELSE 0 END
+                       ), 0) AS unknown_model_tokens
+                FROM token_usage tu
+                JOIN sessions s ON s.id=tu.session_id
+                JOIN sources src ON src.id=s.source_id
+                LEFT JOIN projects p ON p.id=s.project_id
+                LEFT JOIN models tm ON tm.id=tu.model_id
+                LEFT JOIN models sm ON sm.id=s.model_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
+                """ + token_where,
+                token_params,
+            ).fetchone()
+            coverage_rows = conn.execute(
+                """
+                SELECT src.name AS source,
+                       COUNT(DISTINCT s.id) AS sessions,
+                       CASE WHEN EXISTS(
+                           SELECT 1 FROM token_usage tx
+                           JOIN sessions sx ON sx.id=tx.session_id
+                           WHERE sx.source_id=src.id
+                       ) THEN 1 ELSE 0 END AS has_tokens,
+                       CASE WHEN EXISTS(
+                           SELECT 1 FROM token_usage tx
+                           JOIN sessions sx ON sx.id=tx.session_id
+                           WHERE sx.source_id=src.id
+                             AND tx.cached_input_tokens IS NOT NULL
+                       ) THEN 1 ELSE 0 END AS has_cache,
+                       CASE WHEN EXISTS(
+                           SELECT 1 FROM costs cx
+                           JOIN sessions sx ON sx.id=cx.session_id
+                           WHERE sx.source_id=src.id
+                             AND (cx.observed_cost_usd IS NOT NULL
+                                  OR cx.estimated_raw_cost_usd IS NOT NULL)
+                       ) THEN 1 ELSE 0 END AS has_cost
+                FROM sessions s
+                JOIN sources src ON src.id=s.source_id
+                LEFT JOIN projects p ON p.id=s.project_id
+                LEFT JOIN models sm ON sm.id=s.model_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
+                """ + session_where + """
+                GROUP BY src.id, src.name
+                ORDER BY src.name
+                """,
+                session_params,
+            ).fetchall()
+            import_errors = int(
+                conn.execute("SELECT COUNT(*) AS n FROM import_errors").fetchone()["n"]
+            )
+            confidence_rows = conn.execute(
+                """
+                SELECT COALESCE(op.correlation_confidence, 'unknown') AS confidence,
+                       COUNT(*) AS events
+                FROM optimizations op
+                LEFT JOIN sessions s ON s.id=op.session_id
+                LEFT JOIN sources src ON src.id=s.source_id
+                LEFT JOIN projects p ON p.id=s.project_id
+                LEFT JOIN models om ON om.id=op.model_id
+                LEFT JOIN models sm ON sm.id=s.model_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
+                """ + optimization_where + """
+                GROUP BY COALESCE(op.correlation_confidence, 'unknown')
+                ORDER BY confidence
+                """,
+                optimization_params,
+            ).fetchall()
+
+        total_tokens = int(model_tokens["total_tokens"] or 0)
+        unknown_tokens = int(model_tokens["unknown_model_tokens"] or 0)
+        return {
+            "identity_confidence": [dict(row) for row in identity_rows],
+            "unknown_model_tokens": unknown_tokens,
+            "total_tokens": total_tokens,
+            "unknown_model_ratio": (
+                unknown_tokens / total_tokens if total_tokens else 0.0
+            ),
+            "source_coverage": [
+                {
+                    "source": row["source"],
+                    "sessions": int(row["sessions"] or 0),
+                    "has_tokens": bool(row["has_tokens"]),
+                    "has_cache": bool(row["has_cache"]),
+                    "has_cost": bool(row["has_cost"]),
+                }
+                for row in coverage_rows
+            ],
+            "import_errors": import_errors,
+            "optimization_confidence": [dict(row) for row in confidence_rows],
+            "unsupported_provider_diagnostics": None,
+            "diagnostics_note": "Não transportado pelo Team Bundle v1",
+        }
