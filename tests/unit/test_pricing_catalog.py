@@ -91,16 +91,16 @@ def test_builtin_catalog_installs_observed_gpt_56_api_standard_prices(tmp_path):
     assert sol.output_per_1m_usd == 30.0
 
     assert terra is not None
-    assert terra.input_per_1m_usd == 2.50
-    assert terra.cached_input_per_1m_usd == 0.25
-    assert terra.cache_write_per_1m_usd == 3.125
-    assert terra.output_per_1m_usd == 15.0
+    assert terra.input_per_1m_usd == 2.0
+    assert terra.cached_input_per_1m_usd == 0.20
+    assert terra.cache_write_per_1m_usd == 2.50
+    assert terra.output_per_1m_usd == 12.0
 
     assert luna_long is not None
-    assert luna_long.input_per_1m_usd == 2.0
-    assert luna_long.cached_input_per_1m_usd == 0.20
-    assert luna_long.cache_write_per_1m_usd == 2.50
-    assert luna_long.output_per_1m_usd == 9.0
+    assert luna_long.input_per_1m_usd == 0.40
+    assert luna_long.cached_input_per_1m_usd == 0.04
+    assert luna_long.cache_write_per_1m_usd == 0.50
+    assert luna_long.output_per_1m_usd == 1.80
     assert luna_long.valid_from == date(2026, 8, 19)
     assert luna_long.valid_from_basis == "catalog_observed"
     assert luna_long.source_version == "openai-api-standard-observed-2026-08-19"
@@ -174,7 +174,7 @@ def test_new_price_version_does_not_overwrite_historical_price(tmp_path):
     )
 
     assert inserted is True
-    assert august is not None and august.input_per_1m_usd == 2.5
+    assert august is not None and august.input_per_1m_usd == 2.0
     assert september is not None and september.input_per_1m_usd == 3.0
     with db.connect() as conn:
         count = conn.execute(
