@@ -1,0 +1,3 @@
+{"sessionId":"gemini-session-1","projectHash":"project-hash-1","startTime":"2026-08-18T13:00:00Z","lastUpdated":"2026-08-18T13:05:00Z","kind":"main"}
+{"id":"user-1","timestamp":"2026-08-18T13:00:01Z","type":"user","content":"GEMINI_PROMPT_SENTINEL"}
+{"id":"gemini-1","timestamp":"2026-08-18T13:00:02Z","type":"gemini","content":"GEMINI_RESPONSE_SENTINEL","model":"gemini-2.5-pro","tokens":{"input":1500,"output":250,"cached":900,"thoughts":40,"tool":20,"total":1750},"toolCalls":[{"id":"tool-1","name":"read_file","args":{"path":"GEMINI_SECRET_PATH"},"status":"success","timestamp":"2026-08-18T13:00:02Z"}]}
