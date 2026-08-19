@@ -44,6 +44,12 @@ class AnalyticsService:
     def _nullable_sum(row, key: str):
         return row[key] if row and row[key] is not None else None
 
+    @staticmethod
+    def _percent_change(current: float | int | None, previous: float | int | None) -> float | None:
+        if current is None or previous is None or float(previous) == 0.0:
+            return None
+        return ((float(current) - float(previous)) / abs(float(previous))) * 100.0
+
     def _where(
         self,
         *,
@@ -260,6 +266,27 @@ class AnalyticsService:
             observed_cost_usd=self._nullable_sum(cost, "observed_cost_usd"),
             estimated_raw_cost_usd=self._nullable_sum(cost, "estimated_raw_cost_usd"),
         )
+
+    def comparison(self) -> dict[str, float | None] | None:
+        previous_filters = self.filters.previous_period()
+        if previous_filters is None:
+            return None
+
+        current = self.summary()
+        previous = AnalyticsService(self.repository, previous_filters).summary()
+        return {
+            "sessions_pct": self._percent_change(current.sessions, previous.sessions),
+            "total_tokens_pct": self._percent_change(current.total_tokens, previous.total_tokens),
+            "cache_ratio_pp": (current.cache_ratio - previous.cache_ratio) * 100.0,
+            "observed_cost_usd_pct": self._percent_change(
+                current.observed_cost_usd,
+                previous.observed_cost_usd,
+            ),
+            "total_savings_usd_pct": self._percent_change(
+                current.total_savings_usd,
+                previous.total_savings_usd,
+            ),
+        }
 
     def by_project(self) -> list[dict[str, Any]]:
         where, params = self._where(
