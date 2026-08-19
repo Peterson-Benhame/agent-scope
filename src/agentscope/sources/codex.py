@@ -12,6 +12,10 @@ from agentscope.sources.base import (
     SourceDiscovery,
 )
 from agentscope.storage.repository import Repository
+from agentscope.usage_context import (
+    infer_codex_usage_context,
+    persist_session_usage_context,
+)
 
 
 def _hash_file(path: Path) -> str:
@@ -64,6 +68,11 @@ def _tool_category(name: str) -> str:
 def _import_rollout(repository: Repository, path: Path) -> int:
     data = collect_codex_rollout(path)
     session_id = repository.upsert_session(data.session)
+    persist_session_usage_context(
+        repository,
+        session_id,
+        infer_codex_usage_context(data.session),
+    )
     turn_ids: dict[str, int] = {}
     for turn in data.turns:
         turn_ids[turn.external_turn_id] = repository.upsert_turn(session_id, turn)
