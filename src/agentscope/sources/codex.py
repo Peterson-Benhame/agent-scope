@@ -61,7 +61,7 @@ def _tool_category(name: str) -> str:
     return "other"
 
 
-def _import_rollout(repository: Repository, path: Path) -> None:
+def _import_rollout(repository: Repository, path: Path) -> int:
     data = collect_codex_rollout(path)
     session_id = repository.upsert_session(data.session)
     turn_ids: dict[str, int] = {}
@@ -92,6 +92,7 @@ def _import_rollout(repository: Repository, path: Path) -> None:
         repository.upsert_skill_evidence(session_id, evidence)
     for line, error in data.parse_errors:
         repository.record_import_error("codex", str(path), line, "parse", error)
+    return session_id
 
 
 class CodexAdapter:
@@ -128,6 +129,10 @@ class CodexAdapter:
     def collect(self, request: CollectRequest) -> SourceCollectionSummary:
         summary = SourceCollectionSummary()
         repository = request.repository
+        user_id = repository.upsert_user(request.user) if request.user else None
+        machine_id = (
+            repository.upsert_machine(request.machine) if request.machine else None
+        )
         for path in request.discovery.artifacts:
             summary.files_seen += 1
             try:
@@ -135,7 +140,13 @@ class CodexAdapter:
                 if not request.full_rescan and _unchanged(repository, path, digest):
                     summary.files_skipped += 1
                     continue
-                _import_rollout(repository, path)
+                session_id = _import_rollout(repository, path)
+                if user_id is not None or machine_id is not None:
+                    repository.associate_session_identity(
+                        session_id,
+                        user_id,
+                        machine_id,
+                    )
                 _save_state(repository, path, digest)
                 summary.files_imported += 1
                 summary.sessions_imported += 1
