@@ -1,21 +1,22 @@
 # AgentScope
 
-AgentScope is a local-first observability and analytics tool for agent execution histories.
+AgentScope is a local-first observability and analytics tool for AI coding and agent execution histories.
 
-The current implementation ingests local histories from multiple AI development tools, normalizes them into SQLite, and produces safe CSV, JSON, and HTML analytics. Source collection is provider-neutral through a `SourceAdapter` registry so additional agent runtimes, tools, and optimizers can be added without redefining the analytics layer.
+It ingests supported local histories, normalizes them into SQLite, and produces safe analytics for sessions, models, tokens, cache, tools, agents, skills, optimizer metrics, costs and savings. V2 also supports offline sanitized consolidation of multiple developer machines for team analytics.
 
 ## What it analyzes
 
 - sessions and projects;
 - models and token usage when exposed by the source;
 - cached input usage when exposed by the source;
-- agents and subagents when explicit evidence exists;
-- skill availability, loading, and invocation as separate states;
-- tool and MCP calls when exposed by the source;
+- agents/subagents when explicit evidence exists;
+- skill availability, loading and invocation as separate states;
+- tool/MCP calls when exposed by the source;
 - Headroom compression and cache savings;
-- source-reported and estimated costs without presenting estimates as billing facts;
-- trends by day, project, model, user, and machine;
-- filtered periods with comparison against the previous equivalent period.
+- observed/source-reported and estimated costs without presenting estimates as billing facts;
+- trends by day, project, model, source, user and machine;
+- filtered periods;
+- offline team totals and per-user/project/source/model attribution.
 
 Headroom is modeled as an **Optimizer**, not an Agent.
 
@@ -23,9 +24,9 @@ Headroom is modeled as an **Optimizer**, not an Agent.
 
 AgentScope is local-first and treats provider source files as read-only.
 
-Safe metadata reporting is the default. Standard reports and exports do not include complete prompt bodies, assistant messages, tool inputs, or tool outputs. Full message export requires the explicit `--full-content` option.
+Safe reports and exports do not include complete prompt bodies, assistant responses, tool payloads or tool outputs. Full local message export requires the explicit `--full-content` option.
 
-The local SQLite database can contain message content imported from supported source histories. Treat `data/agentscope.db` as sensitive data.
+The local SQLite database can contain normalized message content imported from supported histories, so treat `data/agentscope.db` as sensitive. Team bundles are stricter and never export message bodies or raw provider payloads.
 
 ## Requirements
 
@@ -39,7 +40,9 @@ python -m venv .venv
 python -m pip install -e ".[dev]"
 ```
 
-## Default source roots on Windows
+## Supported source adapters
+
+Default roots on Windows:
 
 ```text
 %USERPROFILE%\.codex\
@@ -50,42 +53,25 @@ python -m pip install -e ".[dev]"
 %USERPROFILE%\.gemini\
 ```
 
-AgentScope never modifies these source files.
+Registered adapters:
 
-### Source adapters
-
-`agentscope collect` discovers enabled source adapters before collection. The registered V2 adapters are:
-
-- `codex` — sessions, messages, tokens/cache, tools, agents and skills when explicit evidence exists;
-- `headroom` — optimizer events, cache metrics and source-reported cost/savings data;
+- `codex` — sessions, messages, tokens/cache, tools, agents and skills when explicitly evidenced;
+- `headroom` — optimizer events, cache metrics and source-reported cost/savings;
 - `claude_code` — verified JSONL sessions/messages/model/tokens/cache/tools;
-- `github_copilot` — verified Copilot CLI session-state events with sessions/messages/model/tokens/cache/tools;
-- `kimi` — documented session index + state metadata only in this version;
-- `gemini` — current JSONL conversation sessions/messages/model/tokens/cache/tools.
+- `github_copilot` — verified Copilot CLI session-state sessions/messages/model/tokens/cache/tools;
+- `kimi` — documented session index + state metadata in this version;
+- `gemini` — current JSONL session/messages/model/tokens/cache/tools.
 
-Provider-specific details and limitations are documented in [`docs/provider-support.md`](docs/provider-support.md).
+See [`docs/provider-support.md`](docs/provider-support.md) for exact format contracts and limitations.
 
-All registered sources are enabled by default. To restrict collection, set the comma-separated `AGENTSCOPE_SOURCES` environment variable:
+All registered sources are enabled by default. Restrict collection with:
 
 ```powershell
 $env:AGENTSCOPE_SOURCES = "codex,claude_code,github_copilot"
 agentscope collect
 ```
 
-Supported source names are:
-
-```text
-codex
-headroom
-claude_code
-github_copilot
-kimi
-gemini
-```
-
-A disabled adapter is not discovered or collected. `agentscope status` reports whether each enabled source was detected, how many supported artifacts were found and any unsupported-format diagnostic.
-
-Provider root overrides are available through:
+Provider root overrides:
 
 ```text
 AGENTSCOPE_CODEX_HOME
@@ -96,11 +82,11 @@ AGENTSCOPE_KIMI_HOME
 AGENTSCOPE_GEMINI_HOME
 ```
 
-### User and machine identity
+Unsupported local formats are reported as diagnostics and are not guessed.
 
-AgentScope keeps the human user and the machine as separate dimensions. Local collection creates stable hashed keys from local OS identity signals and records the local user with confidence `inferred`; a provider identity may later be recorded as `exact` only when the provider exposes explicit safe evidence.
+## User and machine identity
 
-Display names are labels only and never uniqueness keys. They can be customized without changing stable identity:
+Human user and machine are separate dimensions. Local collection creates stable keys from OS identity signals; display names are labels only and do not define uniqueness.
 
 ```powershell
 $env:AGENTSCOPE_USER_NAME = "Dev A"
@@ -108,77 +94,51 @@ $env:AGENTSCOPE_MACHINE_NAME = "Notebook A"
 agentscope collect
 ```
 
-A user can therefore be associated with multiple machines without being counted as a different person solely because the equipment changed.
+One user can therefore be associated with multiple machines without becoming multiple people in analytics.
 
-## CLI
-
-Collect new or changed local data:
+## Local CLI
 
 ```powershell
 agentscope collect
-```
-
-During collection, AgentScope reports detected sources and shows an overall progress bar until it reaches 100%. Unsupported local formats are reported as diagnostics instead of being guessed.
-
-Inspect source and database status:
-
-```powershell
 agentscope status
-```
-
-Show aggregate analytics:
-
-```powershell
 agentscope analyze
-```
-
-Generate safe CSV and JSON datasets:
-
-```powershell
 agentscope export
-```
-
-Generate the local HTML report:
-
-```powershell
 agentscope report
 ```
 
-### Filter analytics
+`analyze`, `export` and `report` share these filters:
 
-The `analyze`, `export`, and `report` commands share the same filters.
+```text
+--from YYYY-MM-DD
+--to YYYY-MM-DD
+--period today|7d|30d|month
+--project
+--model
+--source
+--user
+--machine
+```
+
+Examples:
 
 ```powershell
-agentscope report --period today
 agentscope report --period 7d
-agentscope report --period 30d
-agentscope report --period month
-```
-
-Use an inclusive custom range:
-
-```powershell
 agentscope report --from 2026-08-01 --to 2026-08-18
-```
-
-Custom `--from`/`--to` values override `--period`. Dates use ISO `YYYY-MM-DD` and are inclusive. With no period/date filter, AgentScope preserves the all-history behavior.
-
-Filters can restrict project, model, source, user, and machine:
-
-```powershell
 agentscope analyze --project BN.S584.PerfilInvestidor --period 30d
-agentscope export --model gpt-5.6-terra --period month
-agentscope report --source codex --from 2026-08-01 --to 2026-08-18
 agentscope report --user "Dev A" --machine "Notebook A" --period 30d
 ```
 
-User/machine filters accept the display label used in analytics. The safe session export also carries the corresponding stable keys so offline team consolidation can preserve identity without relying on display names.
+Custom `--from`/`--to` values are inclusive and override `--period`. Without period/date filters, all history is used.
 
-The filtered HTML report displays the selected period and, for bounded periods, compares key metrics with the immediately preceding equivalent period.
+Explicit full local message export:
 
-### Report number and cost formatting
+```powershell
+agentscope export --full-content
+```
 
-The HTML report uses pt-BR display conventions without changing numeric precision stored in SQLite:
+## Number and cost formatting
+
+HTML reports use pt-BR presentation without changing SQLite precision:
 
 ```text
 integer:      1.465.312.344
@@ -186,30 +146,27 @@ percentage:   94,63%
 USD summary:  US$ 13,78
 ```
 
-Detailed technical values may preserve additional decimal precision when useful. Observed/source-reported costs remain distinct from estimated values and estimated savings.
+Observed/source-reported cost, estimated cost and savings remain separate. Unknown cost is `NULL`/`Não disponível`, never zero.
 
-Explicitly export full message content:
+## Team workflow
 
-```powershell
-agentscope export --full-content
+The team architecture is offline and does not require a central server.
+
+```text
+Developer A                    Developer B
+agentscope collect             agentscope collect
+      ↓                              ↓
+local agentscope.db            local agentscope.db
+      ↓                              ↓
+team export                    team export
+      └──── sanitized bundles ──────┘
+                    ↓
+                 team.db
+                    ↓
+          agentscope team report
 ```
 
-When filters are used with `--full-content`, the full-message export obeys the same selected filters.
-
-Custom Codex/Headroom paths remain available as CLI options:
-
-```powershell
-agentscope collect `
-  --codex-home "C:\Users\me\.codex" `
-  --headroom-home "C:\Users\me\.headroom" `
-  --database "D:\AgentScope\agentscope.db"
-```
-
-Use the environment overrides above for the additional provider roots.
-
-## Team bundles
-
-Each developer can keep collection local and export only sanitized telemetry for offline consolidation:
+Export a sanitized bundle on each developer machine:
 
 ```powershell
 agentscope team export `
@@ -219,32 +176,82 @@ agentscope team export `
   --team "Backend"
 ```
 
-The bundle can use the same date, project, model, source, user and machine filters as local analytics. Its schema is `agentscope-team-bundle`, version `1`, with a deterministic SHA-256 `bundle_id` derived from the safe payload.
-
-Import bundles from multiple developer machines into a separate team database:
+Import bundles into the consolidation database:
 
 ```powershell
-agentscope team import .\team-bundle-dev-a.json --database .\data\team.db
-agentscope team import .\team-bundle-dev-b.json --database .\data\team.db
+agentscope team import .\dev-a.json --database .\data\team.db
+agentscope team import .\dev-b.json --database .\data\team.db
 ```
 
-Reimporting the same bundle does not duplicate totals. A regenerated bundle that overlaps prior data inserts only events with new stable namespaced event keys.
+Generate the consolidated report:
 
-Team bundles are allow-list based. They may include stable user/machine identifiers, project name, session identifiers, source/model names, token/cache metrics, monetary metrics already normalized by AgentScope, tool-call metadata, agent evidence and optimizer metrics. They do **not** include prompt bodies, assistant responses, source code, tool payloads/results, attachments, environment variables, secrets, raw provider metadata or source file paths.
+```powershell
+agentscope team report `
+  --database .\data\team.db `
+  --output .\reports\team-report.html
+```
 
-See [`docs/team-bundle.md`](docs/team-bundle.md) for the exact privacy and idempotency contract.
+The team report supports the same date/project/model/source/user/machine filters:
 
-## Output
+```powershell
+agentscope team report --database .\data\team.db --period 30d
+agentscope team report --database .\data\team.db --user "Dev A" --period month
+```
 
-Default database:
+It reports team totals plus usage, observed cost, estimated cost and estimated savings by user, project, source and model. Token volume is explicitly treated as usage, not productivity or developer performance.
+
+### Team budget
+
+Budget is optional:
+
+```powershell
+$env:AGENTSCOPE_MONTHLY_BUDGET_USD = "1000"
+agentscope team report --database .\data\team.db
+```
+
+or per invocation:
+
+```powershell
+agentscope team report `
+  --database .\data\team.db `
+  --monthly-budget-usd 1000
+```
+
+Budget consumption uses observed cost only. Projection is a simple elapsed-month average and is labeled as a projection, not a billing forecast. Negative budgets are rejected.
+
+### Team Bundle contract
+
+The schema is `agentscope-team-bundle`, version `1`. `bundle_id` is a deterministic SHA-256 digest of the safe canonical payload.
+
+Reimporting the same bundle does not duplicate totals. A newer overlapping bundle adds only events with new stable namespaced event keys.
+
+Allowed telemetry can include stable user/machine keys, project name, session/source/model identifiers, token/cache metrics, normalized monetary fields, tool metadata, agent evidence and optimizer metrics.
+
+The bundle excludes:
+
+- prompt/user-message bodies;
+- assistant response bodies;
+- source code;
+- tool arguments/payloads/results;
+- attachments;
+- environment variables and secrets;
+- raw provider metadata;
+- source file paths and local full project paths.
+
+See [`docs/team-bundle.md`](docs/team-bundle.md) and [`docs/team-analytics.md`](docs/team-analytics.md).
+
+## Data quality
+
+Local and team reports expose quality/confidence indicators instead of pretending unknown values are zero.
+
+Team quality includes identity confidence, tokens without a model, observed source coverage for token/cache/cost data, import errors and optimizer/session correlation confidence.
+
+Unsupported-provider discovery diagnostics remain local in Team Bundle v1 and are therefore labeled unavailable in the team report instead of inferred.
+
+## Default output
 
 ```text
 data/agentscope.db
-```
-
-Default reports:
-
-```text
 reports/
 ├── sessions.csv
 ├── token_usage.csv
@@ -262,76 +269,46 @@ reports/
 └── report.html
 ```
 
+Team outputs are chosen explicitly, for example:
+
+```text
+data/team.db
+reports/team-report.html
+```
+
 ## Cost semantics
 
-AgentScope deliberately separates different monetary concepts:
+AgentScope separates:
 
-- **Estimated raw cost** — theoretical cost from a known pricing table, when configured and supported;
-- **Observed/source-reported cost** — value explicitly present in an imported source as an applicable monetary value;
-- **Compression savings** — savings reported or derived from optimizer compression data;
-- **Cache savings** — savings reported by cache-aware optimizer data;
+- **Estimated raw cost** — theoretical cost from a known pricing table when supported;
+- **Observed/source-reported cost** — explicit monetary value present in a source and applicable as USD cost;
+- **Compression savings** — optimizer compression savings;
+- **Cache savings** — optimizer cache savings;
 - **Total savings** — aggregate of known savings categories.
 
-Unknown cost is stored as `NULL`, never as zero.
-
-Headroom cost/savings fields are labeled as source-reported optimizer metrics. They are not automatically treated as the final amount charged by OpenAI or another provider. Non-USD provider credits/multipliers are not written as USD cost.
-
-## Data confidence
-
-AgentScope does not pretend inferred correlation is exact. Optimizer-to-session correlation is classified as:
-
-```text
-exact
-high
-medium
-unknown
-```
-
-Local user identity uses the same principle: inferred OS identity is marked `inferred`; an exact provider identity is only used when explicit provider evidence exists.
-
-Likewise, a skill being available does not prove it was used. AgentScope records:
-
-```text
-available
-loaded
-invoked
-```
-
-separately.
+Headroom monetary fields remain source-reported optimizer metrics and are not automatically claimed as the final OpenAI/provider invoice. Non-USD provider credits or multipliers are not converted to USD spend.
 
 ## Development
 
-Run the full test suite:
+Run the test suite:
 
 ```powershell
 python -m pytest -q
 ```
 
-The test fixtures are synthetic and sanitized. Personal provider histories are not committed.
+Fixtures are synthetic and sanitized. Personal provider histories are not committed.
 
-## Project documentation
-
-The V1 specifications are in [`docs/specs`](docs/specs/README.md).
-
-The V2 multi-source/team design and ordered implementation plans are in:
+## Documentation
 
 ```text
+docs/specs/README.md
 docs/superpowers/specs/2026-08-18-multi-source-team-analytics-design.md
 docs/superpowers/plans/2026-08-18-agentscope-v2-roadmap.md
 docs/provider-support.md
 docs/team-bundle.md
+docs/team-analytics.md
 ```
 
 ## Current boundaries
 
-AgentScope remains analytics-only. It does not:
-
-- route prompts;
-- select agents or models;
-- recommend models;
-- modify provider histories;
-- expose an HTTP API;
-- provide a central team server;
-- provide a VS Code extension yet.
-
-The V2 team workflow consolidates sanitized bundles offline; a central server remains outside the current scope.
+AgentScope remains analytics-only. It does not route prompts, choose models/agents, modify provider histories, expose a central HTTP ingestion server, score developer performance, reconcile provider invoices, or provide a VS Code extension yet.
