@@ -11,6 +11,8 @@
   "main": "./out/extension.js",
   "activationEvents": [
     "onView:agentscope.dashboard",
+    "onView:agentscope.sources",
+    "onView:agentscope.projects",
     "onCommand:agentscope.openDashboard",
     "onCommand:agentscope.refreshDashboard",
     "onCommand:agentscope.selectDatabase"
@@ -32,6 +34,38 @@
         { "id": "agentscope.sources", "name": "Fontes" },
         { "id": "agentscope.projects", "name": "Projetos" }
       ]
+    },
+    "configuration": {
+      "title": "AgentScope",
+      "properties": {
+        "agentscope.executablePath": {
+          "type": "string",
+          "default": "agentscope",
+          "description": "Caminho ou comando do executável AgentScope."
+        },
+        "agentscope.databasePath": {
+          "type": "string",
+          "default": "",
+          "description": "Caminho do banco SQLite AgentScope. Vazio usa o banco padrão do CLI."
+        },
+        "agentscope.defaultPeriod": {
+          "type": "string",
+          "enum": ["today", "7d", "30d", "month"],
+          "default": "7d",
+          "description": "Período inicial do dashboard."
+        },
+        "agentscope.autoRefresh": {
+          "type": "boolean",
+          "default": false,
+          "description": "Reserva a preferência para atualização automática em um incremento posterior."
+        },
+        "agentscope.autoRefreshIntervalSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 10,
+          "description": "Intervalo configurado para atualização automática futura."
+        }
+      }
     }
   },
   "scripts": {
