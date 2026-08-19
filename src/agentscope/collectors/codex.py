@@ -18,7 +18,14 @@ from agentscope.domain.models import (
 )
 
 _ATTACHMENT_RE = re.compile(r"[A-Za-z]:[\\/][^\s\"']*?\.codex[\\/]attachments[\\/][^\s\"']+")
-_SKILL_LINE_RE = re.compile(r"^\s*-\s+([A-Za-z0-9_.:-]+):", re.MULTILINE)
+_SKILLS_BLOCK_RE = re.compile(
+    r"<skills_instructions>(.*?)</skills_instructions>",
+    re.IGNORECASE | re.DOTALL,
+)
+_SKILL_LINE_RE = re.compile(
+    r"^\s*-\s+([A-Za-z0-9][A-Za-z0-9_.-]*(?::[A-Za-z0-9][A-Za-z0-9_.-]*)*):",
+    re.MULTILINE,
+)
 _ROOT_RE = re.compile(r"You are\s+[`']?/root[`']?", re.IGNORECASE)
 
 
@@ -52,6 +59,30 @@ def _content_text(content: Any) -> str:
 
 def _output_text(output: Any) -> str:
     return _content_text(output)
+
+
+def _extract_skill_evidence(
+    text: str,
+    timestamp: str | None,
+    session_id: str | None,
+) -> list[SkillEvidence]:
+    evidence: list[SkillEvidence] = []
+    seen: set[str] = set()
+    for block in _SKILLS_BLOCK_RE.findall(text):
+        for name in _SKILL_LINE_RE.findall(block):
+            if name in seen:
+                continue
+            seen.add(name)
+            evidence.append(
+                SkillEvidence(
+                    name=name,
+                    usage_type=SkillUsageType.AVAILABLE,
+                    evidence_type="skills_catalog",
+                    timestamp=timestamp,
+                    session_external_id=session_id,
+                )
+            )
+    return evidence
 
 
 def _skill_loaded_from_text(text: str, available_names: set[str]) -> set[str]:
@@ -107,7 +138,13 @@ def collect_codex_rollout(path: Path) -> CodexCollectedSession:
             )
         )
 
-    def add_agent(name: str, agent_type: str, parent: str | None, evidence: str, timestamp: str | None) -> None:
+    def add_agent(
+        name: str,
+        agent_type: str,
+        parent: str | None,
+        evidence: str,
+        timestamp: str | None,
+    ) -> None:
         key = (name, agent_type, parent)
         if key in seen_agent:
             return
@@ -202,11 +239,21 @@ def collect_codex_rollout(path: Path) -> CodexCollectedSession:
                 for attachment in _ATTACHMENT_RE.findall(text):
                     if attachment not in result.attachments:
                         result.attachments.append(attachment)
-                names = set(_SKILL_LINE_RE.findall(text))
-                if names:
-                    available_skills.update(names)
-                    for name in names:
-                        add_skill(name, SkillUsageType.AVAILABLE, "skills_catalog", timestamp)
+
+                skill_evidence = _extract_skill_evidence(
+                    text,
+                    timestamp,
+                    session.external_session_id,
+                )
+                for item in skill_evidence:
+                    available_skills.add(item.name)
+                    add_skill(
+                        item.name,
+                        item.usage_type,
+                        item.evidence_type,
+                        item.timestamp,
+                    )
+
                 if _ROOT_RE.search(text):
                     add_agent("root", "root", None, "developer_instruction", timestamp)
                 if role == "assistant":
@@ -214,7 +261,12 @@ def collect_codex_rollout(path: Path) -> CodexCollectedSession:
                     if "using" in lower or "usar" in lower or "usando" in lower:
                         for name in available_skills:
                             if name.lower() in lower:
-                                add_skill(name, SkillUsageType.INVOKED, "assistant_announcement", timestamp)
+                                add_skill(
+                                    name,
+                                    SkillUsageType.INVOKED,
+                                    "assistant_announcement",
+                                    timestamp,
+                                )
                 continue
 
             if payload_type == "custom_tool_call":
@@ -239,13 +291,21 @@ def collect_codex_rollout(path: Path) -> CodexCollectedSession:
                 if tool_call.name == "spawn_agent":
                     agent_name = _spawned_agent(input_text)
                     if agent_name:
-                        add_agent(agent_name, "subagent", "root", "spawn_agent", timestamp)
+                        add_agent(
+                            agent_name,
+                            "subagent",
+                            "root",
+                            "spawn_agent",
+                            timestamp,
+                        )
                 continue
 
             if payload_type == "custom_tool_call_output":
                 call_id = payload.get("call_id")
                 if call_id and str(call_id) in calls_by_id:
-                    calls_by_id[str(call_id)].output_size = len(_output_text(payload.get("output")))
+                    calls_by_id[str(call_id)].output_size = len(
+                        _output_text(payload.get("output"))
+                    )
                 continue
 
         if event_type == "event_msg" and isinstance(payload, dict):
