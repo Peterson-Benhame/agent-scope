@@ -26,8 +26,18 @@ def test_extension_snapshot_cli_returns_machine_readable_json(tmp_path):
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["schema"] == "agentscope-extension-snapshot"
-    assert payload["version"] == 1
+    assert payload["version"] == 2
     assert payload["summary"]["sessions"] == 1
+    assert "estimated_cost_usd" in payload["summary"]
+    assert set(payload["availability"]) == {
+        "observed_cost",
+        "estimated_cost",
+        "estimated_savings",
+    }
+    assert isinstance(payload["series"]["daily"], list)
+    assert isinstance(payload["breakdowns"]["projects"], list)
+    assert isinstance(payload["breakdowns"]["models"], list)
+    assert isinstance(payload["breakdowns"]["sources"], list)
     assert isinstance(payload["dimensions"]["projects"], list)
     assert isinstance(payload["dimensions"]["models"], list)
     assert isinstance(payload["dimensions"]["sources"], list)
@@ -44,7 +54,12 @@ def test_extension_snapshot_cli_applies_custom_date_range(tmp_path):
     assert inside.exit_code == 0, inside.output
     assert json.loads(inside.output)["summary"]["sessions"] == 1
     assert outside.exit_code == 0, outside.output
-    assert json.loads(outside.output)["summary"]["sessions"] == 0
+    outside_payload = json.loads(outside.output)
+    assert outside_payload["summary"]["sessions"] == 0
+    assert outside_payload["series"]["daily"] == []
+    assert outside_payload["breakdowns"]["projects"] == []
+    assert outside_payload["breakdowns"]["models"] == []
+    assert outside_payload["breakdowns"]["sources"] == []
 
 
 @pytest.mark.parametrize(
@@ -63,7 +78,9 @@ def test_extension_snapshot_cli_applies_dimension_filters(tmp_path, flag, value)
     result = invoke_snapshot(db, flag, value)
 
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output)["summary"]["sessions"] == 0
+    payload = json.loads(result.output)
+    assert payload["summary"]["sessions"] == 0
+    assert payload["series"]["daily"] == []
 
 
 def test_extension_snapshot_cli_rejects_missing_database(tmp_path):
