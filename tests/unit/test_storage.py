@@ -1,3 +1,5 @@
+import sqlite3
+
 from agentscope.domain.models import NormalizedMessage, NormalizedSession
 from agentscope.storage.database import Database
 from agentscope.storage.repository import Repository
@@ -12,8 +14,82 @@ def test_database_initializes_required_schema(tmp_path):
         "sources", "projects", "models", "sessions", "turns", "messages",
         "agents", "session_agents", "skills", "session_skills", "tools",
         "tool_calls", "token_usage", "optimizers", "optimizations", "costs",
-        "import_state", "import_errors", "schema_migrations"
+        "import_state", "import_errors", "schema_migrations", "users", "machines"
     }.issubset(names)
+
+
+def test_v1_database_migrates_additively_and_idempotently(tmp_path):
+    path = tmp_path / "v1.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE schema_migrations (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            description TEXT NOT NULL
+        );
+        INSERT INTO schema_migrations(version, description)
+        VALUES(1, 'Initial AgentScope schema');
+
+        CREATE TABLE sources (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            type TEXT NOT NULL,
+            version TEXT
+        );
+        INSERT INTO sources(id, name, type) VALUES(1, 'codex', 'codex');
+
+        CREATE TABLE sessions (
+            id INTEGER PRIMARY KEY,
+            source_id INTEGER NOT NULL REFERENCES sources(id),
+            external_session_id TEXT NOT NULL,
+            project_id INTEGER,
+            started_at TEXT,
+            ended_at TEXT,
+            originator TEXT,
+            provider TEXT,
+            model_id INTEGER,
+            cli_version TEXT,
+            raw_file_path TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            UNIQUE(source_id, external_session_id)
+        );
+        INSERT INTO sessions(id, source_id, external_session_id, started_at)
+        VALUES(1, 1, 'legacy-session', '2026-08-18T10:00:00Z');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    db = Database(path)
+    db.initialize()
+    db.initialize()
+
+    with db.connect() as migrated:
+        names = {
+            row[0]
+            for row in migrated.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        session_columns = {
+            row[1] for row in migrated.execute("PRAGMA table_info(sessions)")
+        }
+        versions = [
+            row[0]
+            for row in migrated.execute(
+                "SELECT version FROM schema_migrations ORDER BY version"
+            )
+        ]
+        legacy = migrated.execute(
+            "SELECT external_session_id, started_at FROM sessions WHERE id=1"
+        ).fetchone()
+
+    assert {"users", "machines"}.issubset(names)
+    assert {"user_id", "machine_id"}.issubset(session_columns)
+    assert versions == [1, 2]
+    assert legacy[0] == "legacy-session"
+    assert legacy[1] == "2026-08-18T10:00:00Z"
 
 
 def test_foreign_keys_are_enabled(tmp_path):
