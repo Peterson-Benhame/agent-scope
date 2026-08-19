@@ -1,7 +1,7 @@
 from datetime import date
 
+from agentscope.analytics.dashboard import DashboardAnalyticsService
 from agentscope.analytics.filters import AnalyticsFilter
-from agentscope.analytics.service import AnalyticsService
 from agentscope.storage.database import Database
 from agentscope.storage.repository import Repository
 
@@ -87,7 +87,7 @@ def test_by_day_combines_session_usage_cache_and_monetary_metrics(tmp_path):
     db, repo = _repo(tmp_path)
     _insert_session(db, "session-1", "2026-08-19T10:00:00Z")
 
-    rows = AnalyticsService(repo).by_day()
+    rows = DashboardAnalyticsService(repo).by_day()
 
     assert rows == [
         {
@@ -112,7 +112,7 @@ def test_by_day_keeps_session_without_token_or_money_events(tmp_path):
         with_money=False,
     )
 
-    rows = AnalyticsService(repo).by_day()
+    rows = DashboardAnalyticsService(repo).by_day()
 
     assert rows == [
         {
@@ -140,7 +140,7 @@ def test_dashboard_breakdowns_and_series_honor_all_filters(tmp_path):
         user="Dev A",
         machine="Notebook A",
     )
-    analytics = AnalyticsService(repo, filters)
+    analytics = DashboardAnalyticsService(repo, filters)
 
     assert analytics.by_day()[0]["date"] == "2026-08-19"
     assert analytics.by_project()[0]["project"] == "Project A"
@@ -151,6 +151,6 @@ def test_dashboard_breakdowns_and_series_honor_all_filters(tmp_path):
         {"source": "codex", "sessions": 1, "total_tokens": 150}
     ]
 
-    missing = AnalyticsService(repo, AnalyticsFilter(user="Missing"))
+    missing = DashboardAnalyticsService(repo, AnalyticsFilter(user="Missing"))
     assert missing.by_day() == []
     assert missing.by_source() == []
