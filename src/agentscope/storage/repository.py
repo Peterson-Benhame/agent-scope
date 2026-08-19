@@ -393,11 +393,13 @@ class Repository:
             model_id = self.upsert_model(conn, usage.model)
             conn.execute(
                 """
-                INSERT OR IGNORE INTO token_usage(
+                INSERT INTO token_usage(
                     session_id, turn_id, timestamp, model_id, input_tokens, cached_input_tokens,
                     cache_write_input_tokens, output_tokens, reasoning_output_tokens, total_tokens,
-                    context_window, source_file, source_line, event_key
-                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    context_window, source_file, source_line, token_source, event_key
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(event_key) DO UPDATE SET
+                    token_source=excluded.token_source
                 """,
                 (
                     session_id,
@@ -413,6 +415,7 @@ class Repository:
                     usage.context_window,
                     usage.source_file,
                     usage.source_line,
+                    usage.token_source,
                     key,
                 ),
             )
