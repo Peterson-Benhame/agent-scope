@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from agentscope.collectors.codex import collect_codex_rollout
@@ -86,6 +87,37 @@ def test_non_model_prose_does_not_replace_explicit_model():
     assert data.session.model == "gpt-5.6-terra"
     assert all(turn.model != "revisão automática do codex" for turn in data.turns)
     assert all(usage.model != "revisão automática do codex" for usage in data.token_usage)
+
+
+def test_explicit_review_label_is_not_accepted_as_model(tmp_path):
+    rollout = tmp_path / "rollout.jsonl"
+    events = [
+        {
+            "timestamp": "2026-08-18T10:00:00Z",
+            "type": "session_meta",
+            "payload": {
+                "session_id": "review-session",
+                "timestamp": "2026-08-18T10:00:00Z",
+            },
+        },
+        {
+            "timestamp": "2026-08-18T10:00:01Z",
+            "type": "turn_context",
+            "payload": {
+                "turn_id": "turn-review",
+                "model": "revisão automática do codex",
+            },
+        },
+    ]
+    rollout.write_text(
+        "\n".join(json.dumps(event, ensure_ascii=False) for event in events) + "\n",
+        encoding="utf-8",
+    )
+
+    data = collect_codex_rollout(rollout)
+
+    assert data.session.model is None
+    assert data.turns[0].model is None
 
 
 def test_agent_evidence_detects_root_and_spawned_agent():
