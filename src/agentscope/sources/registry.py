@@ -16,12 +16,16 @@ class SourceRegistry:
     def adapters(self) -> tuple[SourceAdapter, ...]:
         return self._adapters
 
+    @property
+    def source_names(self) -> tuple[str, ...]:
+        return tuple(adapter.source_name for adapter in self._adapters)
+
     def discover(
         self,
         context: DiscoveryContext,
         enabled_sources: set[str] | frozenset[str] | None = None,
     ) -> list[SourceDiscovery]:
-        registered = {adapter.source_name for adapter in self._adapters}
+        registered = set(self.source_names)
         if enabled_sources is not None:
             unknown = sorted(set(enabled_sources) - registered)
             if unknown:
