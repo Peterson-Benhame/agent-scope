@@ -158,17 +158,8 @@ def test_calculates_each_model_from_uncached_cached_cache_write_and_output(tmp_p
     assert {row["pricing_version"] for row in rows} == {"test-pricing-v1"}
 
 
-def test_uses_local_usage_day_for_non_retroactive_pricing(tmp_path):
+def test_uses_local_usage_day_with_provider_declared_history(tmp_path):
     db, repo = _repo(tmp_path)
-    _price(
-        repo,
-        model="gpt-5.6-sol",
-        context_type="short",
-        input_price=5.0,
-        cached_price=0.5,
-        cache_write_price=6.25,
-        output_price=30.0,
-    )
     _add_openai_usage(
         repo,
         external_session_id="cross-midnight",
@@ -183,13 +174,16 @@ def test_uses_local_usage_day_for_non_retroactive_pricing(tmp_path):
     summary = calculate_token_usage_costs(repo, utc_offset_minutes=-180)
 
     assert summary.events_scanned == 1
-    assert summary.events_priced == 0
-    assert summary.events_unpriced == 1
-    assert summary.complete is False
-    assert summary.total_estimated_cost_usd is None
-    assert summary.unpriced_reasons == {"pricing_unavailable": 1}
+    assert summary.events_priced == 1
+    assert summary.events_unpriced == 0
+    assert summary.complete is True
+    assert summary.total_estimated_cost_usd == pytest.approx(0.008)
+    assert summary.unpriced_reasons == {}
     with db.connect() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM costs WHERE token_usage_id IS NOT NULL").fetchone()[0] == 0
+        row = conn.execute(
+            "SELECT pricing_version FROM costs WHERE token_usage_id IS NOT NULL"
+        ).fetchone()
+    assert row["pricing_version"] == "openai-gpt-5.6-launch-2026-07-09"
 
 
 def test_calculation_is_idempotent_per_token_usage_event(tmp_path):
