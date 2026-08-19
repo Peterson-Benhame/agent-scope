@@ -21,6 +21,11 @@ export interface SnapshotSummary {
   estimated_savings_usd: number | null;
 }
 
+export interface SnapshotFreshness {
+  last_imported_at: string | null;
+  artifacts_tracked: number;
+}
+
 export type AvailabilityReason =
   | 'source_does_not_report_cost'
   | 'insufficient_pricing_data'
@@ -95,6 +100,7 @@ export interface ExtensionSnapshot {
   version: 2;
   generated_at: string;
   database: string;
+  freshness?: SnapshotFreshness;
   filters: SnapshotFilters;
   summary: SnapshotSummary;
   availability: SnapshotAvailability;
@@ -188,6 +194,19 @@ function validateBreakdown(value: unknown, labelKey: string): void {
   }
 }
 
+function validateFreshness(value: unknown): void {
+  if (!isRecord(value)) invalid('Snapshot freshness is invalid.');
+  if (
+    value.last_imported_at !== null &&
+    typeof value.last_imported_at !== 'string'
+  ) {
+    invalid('Snapshot last import timestamp is invalid.');
+  }
+  if (!isFiniteNumber(value.artifacts_tracked)) {
+    invalid('Snapshot tracked artifact count is invalid.');
+  }
+}
+
 export function parseExtensionSnapshot(value: unknown): ExtensionSnapshot {
   if (!isRecord(value)) return invalid('Snapshot must be an object.');
   if (value.schema !== 'agentscope-extension-snapshot') return invalid('Unexpected snapshot schema.');
@@ -200,6 +219,7 @@ export function parseExtensionSnapshot(value: unknown): ExtensionSnapshot {
   if (typeof value.generated_at !== 'string' || typeof value.database !== 'string') {
     return invalid('Snapshot metadata is invalid.');
   }
+  if (value.freshness !== undefined) validateFreshness(value.freshness);
   if (
     !isRecord(value.filters) || !isRecord(value.summary) ||
     !isRecord(value.availability) || !isRecord(value.series) ||
