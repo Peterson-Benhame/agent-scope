@@ -14,6 +14,7 @@ from agentscope.analytics.service import AnalyticsService
 from agentscope.analytics.team_service import TeamAnalyticsService
 from agentscope.config import AgentScopeConfig
 from agentscope.extension.snapshot import build_extension_snapshot
+from agentscope.identity_backfill import backfill_local_identity
 from agentscope.importer import (
     ProgressEvent,
     collect_registered_sources,
@@ -30,8 +31,10 @@ from agentscope.team.importer import import_team_bundle
 app = typer.Typer(help="Local-first observability and analytics for agent execution histories.")
 team_app = typer.Typer(help="Export, import and report sanitized team telemetry.")
 extension_app = typer.Typer(help="Machine-readable integration commands.")
+identity_app = typer.Typer(help="Identity maintenance commands.")
 app.add_typer(team_app, name="team")
 app.add_typer(extension_app, name="extension")
+app.add_typer(identity_app, name="identity")
 
 
 def _render_collect_progress(event: ProgressEvent) -> None:
@@ -142,6 +145,37 @@ def collect(
     )
     for diagnostic in summary.diagnostics:
         typer.echo(f"diagnostic={diagnostic}")
+    if summary.errors:
+        raise typer.Exit(code=1)
+
+
+@identity_app.command("backfill")
+def identity_backfill(
+    database: Optional[Path] = typer.Option(None, "--database"),
+    source: Optional[str] = typer.Option(None, "--source"),
+    user_name: Optional[str] = typer.Option(None, "--user-name"),
+    machine_name: Optional[str] = typer.Option(None, "--machine-name"),
+) -> None:
+    config = AgentScopeConfig.from_env(
+        database_path=database,
+        enabled_sources={source} if source else None,
+        user_display_name=user_name,
+        machine_display_name=machine_name,
+    )
+    repo = _repository(config.database_path)
+    active_sources = frozenset({source}) if source else None
+    summary = backfill_local_identity(
+        repo,
+        config,
+        sources=active_sources,
+    )
+    typer.echo(
+        f"sessions_scanned={summary.sessions_scanned} "
+        f"sessions_updated={summary.sessions_updated} "
+        f"sessions_without_user={summary.sessions_without_user} "
+        f"sessions_without_machine={summary.sessions_without_machine} "
+        f"errors={summary.errors}"
+    )
     if summary.errors:
         raise typer.Exit(code=1)
 
