@@ -1,0 +1,86 @@
+{
+  "name": "agentscope",
+  "displayName": "AgentScope",
+  "description": "Local-first AI coding analytics inside VS Code",
+  "version": "0.1.0",
+  "publisher": "peterson-benhame",
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "categories": ["Visualization", "Other"],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onView:agentscope.dashboard",
+    "onView:agentscope.sources",
+    "onView:agentscope.projects",
+    "onCommand:agentscope.openDashboard",
+    "onCommand:agentscope.refreshDashboard",
+    "onCommand:agentscope.selectDatabase"
+  ],
+  "contributes": {
+    "commands": [
+      { "command": "agentscope.openDashboard", "title": "AgentScope: Open Dashboard" },
+      { "command": "agentscope.refreshDashboard", "title": "AgentScope: Refresh Dashboard" },
+      { "command": "agentscope.selectDatabase", "title": "AgentScope: Select Database" }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "agentscope", "title": "AgentScope", "icon": "media/agentscope.svg" }
+      ]
+    },
+    "views": {
+      "agentscope": [
+        { "id": "agentscope.dashboard", "name": "Dashboard", "type": "webview" },
+        { "id": "agentscope.sources", "name": "Fontes" },
+        { "id": "agentscope.projects", "name": "Projetos" }
+      ]
+    },
+    "configuration": {
+      "title": "AgentScope",
+      "properties": {
+        "agentscope.executablePath": {
+          "type": "string",
+          "default": "agentscope",
+          "description": "Caminho ou comando do executável AgentScope."
+        },
+        "agentscope.databasePath": {
+          "type": "string",
+          "default": "",
+          "description": "Caminho do banco SQLite AgentScope. Vazio usa o banco padrão do CLI."
+        },
+        "agentscope.defaultPeriod": {
+          "type": "string",
+          "enum": ["today", "7d", "30d", "month"],
+          "default": "7d",
+          "description": "Período inicial do dashboard."
+        },
+        "agentscope.autoRefresh": {
+          "type": "boolean",
+          "default": false,
+          "description": "Reserva a preferência para atualização automática em um incremento posterior."
+        },
+        "agentscope.autoRefreshIntervalSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 10,
+          "description": "Intervalo configurado para atualização automática futura."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "pretest": "npm run compile",
+    "test": "vscode-test",
+    "test:unit": "mocha \"out/test/unit/**/*.test.js\""
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.104.0",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2",
+    "mocha": "^11.0.0",
+    "typescript": "^5.8.0"
+  }
+}

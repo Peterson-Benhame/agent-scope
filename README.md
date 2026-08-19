@@ -136,6 +136,40 @@ Explicit full local message export:
 agentscope export --full-content
 ```
 
+## VS Code Visual MVP
+
+The repository includes a local VS Code extension under `vscode-extension/`. The extension does not open SQLite directly. It calls the machine-readable AgentScope integration command and renders only allow-listed analytics metadata:
+
+```powershell
+agentscope extension snapshot --json --period 7d
+```
+
+The visual MVP provides an AgentScope Activity Bar entry with Dashboard, Fontes and Projetos views. The dashboard shows Sessions, Total tokens, Tokens saved, Cache ratio, Observed cost and Estimated savings, with filters for Today, 7 days, 30 days, Month, custom dates, project, model, source, user and machine.
+
+Development prerequisites:
+
+```powershell
+python -m pip install -e ".[dev]"
+cd vscode-extension
+npm install
+npm run compile
+npm run test:unit
+```
+
+From the repository root in VS Code, press `F5` and choose `Run AgentScope VS Code Extension`. The launch configuration compiles the TypeScript package and opens an Extension Development Host.
+
+Useful extension settings:
+
+```text
+agentscope.executablePath
+agentscope.databasePath
+agentscope.defaultPeriod
+agentscope.autoRefresh
+agentscope.autoRefreshIntervalSeconds
+```
+
+`agentscope.databasePath` can be left empty to use the CLI default, or selected from the command `AgentScope: Select Database`. The `autoRefresh` settings are reserved configuration for a later operational increment; this MVP refreshes on open, filter changes, database selection, and explicit refresh.
+
 ## Number and cost formatting
 
 HTML reports use pt-BR presentation without changing SQLite precision:
@@ -290,10 +324,19 @@ Headroom monetary fields remain source-reported optimizer metrics and are not au
 
 ## Development
 
-Run the test suite:
+Run the Python test suite:
 
 ```powershell
 python -m pytest -q
+```
+
+Run the VS Code extension checks:
+
+```powershell
+cd vscode-extension
+npm run compile
+npm run test:unit
+npm test
 ```
 
 Fixtures are synthetic and sanitized. Personal provider histories are not committed.
@@ -303,7 +346,9 @@ Fixtures are synthetic and sanitized. Personal provider histories are not commit
 ```text
 docs/specs/README.md
 docs/superpowers/specs/2026-08-18-multi-source-team-analytics-design.md
+docs/superpowers/specs/2026-08-19-vscode-visual-mvp-design.md
 docs/superpowers/plans/2026-08-18-agentscope-v2-roadmap.md
+docs/superpowers/plans/2026-08-19-vscode-visual-mvp.md
 docs/provider-support.md
 docs/team-bundle.md
 docs/team-analytics.md
@@ -311,4 +356,4 @@ docs/team-analytics.md
 
 ## Current boundaries
 
-AgentScope remains analytics-only. It does not route prompts, choose models/agents, modify provider histories, expose a central HTTP ingestion server, score developer performance, reconcile provider invoices, or provide a VS Code extension yet.
+AgentScope remains local-first and analytics-focused. It does not route prompts, choose models/agents, modify provider histories, expose a central HTTP ingestion server, score developer performance, or reconcile provider invoices. The current VS Code MVP is visual/read-only analytics; charts, `Collect now`, operational auto-refresh, team UI, VSIX packaging and Marketplace publication are deferred to later increments.
