@@ -37,6 +37,8 @@ def _where(
     project_expression: str | None = None,
     model_expression: str | None = None,
     source_expression: str | None = None,
+    user_expression: str | None = None,
+    machine_expression: str | None = None,
 ) -> tuple[str, list[object]]:
     clauses: list[str] = []
     params: list[object] = []
@@ -56,8 +58,31 @@ def _where(
     if filters.source is not None and source_expression:
         clauses.append(f"{source_expression} = ?")
         params.append(filters.source)
+    if filters.user is not None and user_expression:
+        clauses.append(f"{user_expression} = ?")
+        params.append(filters.user)
+    if filters.machine is not None and machine_expression:
+        clauses.append(f"{machine_expression} = ?")
+        params.append(filters.machine)
 
     return (" WHERE " + " AND ".join(clauses) if clauses else "", params)
+
+
+def _filtered_where(
+    filters: AnalyticsFilter,
+    *,
+    date_expression: str,
+    model_expression: str,
+) -> tuple[str, list[object]]:
+    return _where(
+        filters,
+        date_expression=date_expression,
+        project_expression="p.name",
+        model_expression=model_expression,
+        source_expression="src.name",
+        user_expression="COALESCE(u.display_name, u.stable_key)",
+        machine_expression="COALESCE(mc.display_name, mc.stable_key)",
+    )
 
 
 def export_datasets(
@@ -73,42 +98,36 @@ def export_datasets(
     if active_filters != analytics.filters:
         analytics = AnalyticsService(repository, active_filters)
 
-    sessions_where, sessions_params = _where(
+    sessions_where, sessions_params = _filtered_where(
         active_filters,
         date_expression="s.started_at",
-        project_expression="p.name",
         model_expression="m.name",
-        source_expression="src.name",
     )
-    token_where, token_params = _where(
+    token_where, token_params = _filtered_where(
         active_filters,
         date_expression="tu.timestamp",
-        project_expression="p.name",
         model_expression="COALESCE(m.name, sm.name)",
-        source_expression="src.name",
     )
-    cost_where, cost_params = _where(
+    cost_where, cost_params = _filtered_where(
         active_filters,
         date_expression="c.period_start",
-        project_expression="p.name",
         model_expression="COALESCE(cm.name, sm.name)",
-        source_expression="src.name",
     )
-    tool_where, tool_params = _where(
+    tool_where, tool_params = _filtered_where(
         active_filters,
         date_expression="tc.timestamp",
-        project_expression="p.name",
         model_expression="sm.name",
-        source_expression="src.name",
     )
-    optimization_where, optimization_params = _where(
+    optimization_where, optimization_params = _filtered_where(
         active_filters,
         date_expression="op.timestamp",
-        project_expression="p.name",
         model_expression="COALESCE(m.name, sm.name)",
-        source_expression="src.name",
     )
 
+    identity_joins = """
+            LEFT JOIN users u ON u.id=s.user_id
+            LEFT JOIN machines mc ON mc.id=s.machine_id
+    """
     datasets: dict[str, list[dict[str, Any]]] = {
         "sessions": _query(
             repository,
@@ -116,12 +135,17 @@ def export_datasets(
             SELECT s.external_session_id AS session_id,
                    COALESCE(p.name, '(unknown)') AS project,
                    s.started_at, s.ended_at, s.originator, s.provider,
-                   m.name AS model, src.name AS source, s.cli_version
+                   m.name AS model, src.name AS source, s.cli_version,
+                   u.stable_key AS user_key,
+                   COALESCE(u.display_name, u.stable_key) AS user,
+                   u.identity_confidence,
+                   mc.stable_key AS machine_key,
+                   COALESCE(mc.display_name, mc.stable_key) AS machine
             FROM sessions s
             LEFT JOIN projects p ON p.id=s.project_id
             LEFT JOIN models m ON m.id=s.model_id
             JOIN sources src ON src.id=s.source_id
-            """ + sessions_where + " ORDER BY s.started_at, s.id",
+            """ + identity_joins + sessions_where + " ORDER BY s.started_at, s.id",
             sessions_params,
         ),
         "token_usage": _query(
@@ -138,7 +162,7 @@ def export_datasets(
             LEFT JOIN models m ON m.id=tu.model_id
             LEFT JOIN models sm ON sm.id=s.model_id
             JOIN sources src ON src.id=s.source_id
-            """ + token_where + " ORDER BY tu.timestamp, tu.id",
+            """ + identity_joins + token_where + " ORDER BY tu.timestamp, tu.id",
             token_params,
         ),
         "costs": _query(
@@ -154,7 +178,7 @@ def export_datasets(
             LEFT JOIN models cm ON cm.id=c.model_id
             LEFT JOIN models sm ON sm.id=s.model_id
             LEFT JOIN sources src ON src.id=s.source_id
-            """ + cost_where + " ORDER BY c.id",
+            """ + identity_joins + cost_where + " ORDER BY c.id",
             cost_params,
         ),
         "agents": analytics.by_agent(),
@@ -170,7 +194,7 @@ def export_datasets(
             LEFT JOIN projects p ON p.id=s.project_id
             LEFT JOIN models sm ON sm.id=s.model_id
             JOIN sources src ON src.id=s.source_id
-            """ + tool_where + " ORDER BY tc.timestamp, tc.id",
+            """ + identity_joins + tool_where + " ORDER BY tc.timestamp, tc.id",
             tool_params,
         ),
         "optimizations": _query(
@@ -189,11 +213,13 @@ def export_datasets(
             LEFT JOIN models m ON m.id=op.model_id
             LEFT JOIN models sm ON sm.id=s.model_id
             LEFT JOIN sources src ON src.id=s.source_id
-            """ + optimization_where + " ORDER BY op.timestamp, op.id",
+            """ + identity_joins + optimization_where + " ORDER BY op.timestamp, op.id",
             optimization_params,
         ),
         "usage_by_project": analytics.by_project(),
         "usage_by_model": analytics.by_model(),
+        "usage_by_user": analytics.by_user(),
+        "usage_by_machine": analytics.by_machine(),
         "usage_by_day": analytics.by_day(),
     }
 
@@ -211,12 +237,10 @@ def export_datasets(
     created.append(json_path)
 
     if include_content:
-        message_where, message_params = _where(
+        message_where, message_params = _filtered_where(
             active_filters,
             date_expression="msg.timestamp",
-            project_expression="p.name",
             model_expression="sm.name",
-            source_expression="src.name",
         )
         messages = _query(
             repository,
@@ -228,7 +252,7 @@ def export_datasets(
             LEFT JOIN projects p ON p.id=s.project_id
             LEFT JOIN models sm ON sm.id=s.model_id
             JOIN sources src ON src.id=s.source_id
-            """ + message_where + " ORDER BY msg.timestamp, msg.id",
+            """ + identity_joins + message_where + " ORDER BY msg.timestamp, msg.id",
             message_params,
         )
         full_path = output_dir / "messages_full.json"
