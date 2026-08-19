@@ -2,7 +2,7 @@ import json
 import shutil
 from pathlib import Path
 
-from agentscope.importer import collect_sources
+from agentscope.importer import ProgressEvent, collect_sources
 from agentscope.storage.database import Database
 from agentscope.storage.repository import Repository
 
@@ -28,8 +28,10 @@ def make_codex_home(tmp_path):
 def test_double_import_is_logically_idempotent(tmp_path):
     db, repo = make_repo(tmp_path)
     codex_home, _ = make_codex_home(tmp_path)
+
     first = collect_sources(repo, codex_home=codex_home)
     second = collect_sources(repo, codex_home=codex_home)
+
     assert first.sessions_imported == 1
     assert second.files_skipped == 1
     with db.connect() as conn:
@@ -50,8 +52,10 @@ def test_append_import_adds_only_new_logical_event(tmp_path):
     }
     with rollout.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(new_line) + "\n")
+
     summary = collect_sources(repo, codex_home=codex_home)
     state = repo.get_import_state("codex", str(rollout))
+
     assert summary.sessions_imported == 1
     assert state["last_offset"] > before
     with db.connect() as conn:
@@ -73,9 +77,39 @@ def test_headroom_import_is_idempotent_and_optimizer_is_not_agent(tmp_path):
     db, repo = make_repo(tmp_path)
     headroom_home = tmp_path / ".headroom"
     shutil.copytree(HEADROOM_FIXTURE, headroom_home)
+
     collect_sources(repo, headroom_home=headroom_home)
     collect_sources(repo, headroom_home=headroom_home)
+
     with db.connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM optimizers WHERE name='headroom'").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM optimizations").fetchone()[0] == 2
         assert conn.execute("SELECT COUNT(*) FROM agents WHERE name='headroom'").fetchone()[0] == 0
+
+
+def test_collect_emits_monotonic_progress_until_complete(tmp_path):
+    _, repo = make_repo(tmp_path)
+    codex_home, _ = make_codex_home(tmp_path)
+    headroom_home = tmp_path / ".headroom"
+    shutil.copytree(HEADROOM_FIXTURE, headroom_home)
+    events: list[ProgressEvent] = []
+
+    collect_sources(
+        repo,
+        codex_home=codex_home,
+        headroom_home=headroom_home,
+        progress=events.append,
+    )
+
+    assert events[0].stage == "discovering"
+    assert events[0].current == 0
+    assert events[0].total == 0
+    collecting = [event for event in events if event.stage == "collecting"]
+    assert collecting
+    assert [event.current for event in collecting] == sorted(event.current for event in collecting)
+    assert collecting[-1].current == collecting[-1].total
+    assert events[-1] == ProgressEvent(
+        stage="complete",
+        current=collecting[-1].total,
+        total=collecting[-1].total,
+    )
