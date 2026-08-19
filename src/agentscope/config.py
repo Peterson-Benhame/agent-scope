@@ -14,6 +14,8 @@ class AgentScopeConfig:
     safe_mode: bool = True
     timezone: str | None = None
     enabled_sources: frozenset[str] | None = None
+    user_display_name: str | None = None
+    machine_display_name: str | None = None
 
     @classmethod
     def from_env(
@@ -25,6 +27,8 @@ class AgentScopeConfig:
         database_path: Path | None = None,
         reports_path: Path | None = None,
         enabled_sources: frozenset[str] | set[str] | None = None,
+        user_display_name: str | None = None,
+        machine_display_name: str | None = None,
     ) -> "AgentScopeConfig":
         base = Path(base_dir or Path.cwd())
         user_home = Path(
@@ -66,6 +70,17 @@ class AgentScopeConfig:
                 }
                 configured_sources = frozenset(parsed) if parsed else None
 
+        resolved_user_name = (
+            user_display_name
+            if user_display_name is not None
+            else os.environ.get("AGENTSCOPE_USER_NAME")
+        )
+        resolved_machine_name = (
+            machine_display_name
+            if machine_display_name is not None
+            else os.environ.get("AGENTSCOPE_MACHINE_NAME")
+        )
+
         return cls(
             codex_home=codex,
             headroom_home=headroom,
@@ -78,4 +93,6 @@ class AgentScopeConfig:
                 if configured_sources is not None
                 else None
             ),
+            user_display_name=resolved_user_name,
+            machine_display_name=resolved_machine_name,
         )
