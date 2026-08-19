@@ -207,6 +207,33 @@ agentscope collect `
 
 Use the environment overrides above for the additional provider roots.
 
+## Team bundles
+
+Each developer can keep collection local and export only sanitized telemetry for offline consolidation:
+
+```powershell
+agentscope team export `
+  --database .\data\agentscope.db `
+  --output .\team-bundle.json `
+  --organization "Minha Empresa" `
+  --team "Backend"
+```
+
+The bundle can use the same date, project, model, source, user and machine filters as local analytics. Its schema is `agentscope-team-bundle`, version `1`, with a deterministic SHA-256 `bundle_id` derived from the safe payload.
+
+Import bundles from multiple developer machines into a separate team database:
+
+```powershell
+agentscope team import .\team-bundle-dev-a.json --database .\data\team.db
+agentscope team import .\team-bundle-dev-b.json --database .\data\team.db
+```
+
+Reimporting the same bundle does not duplicate totals. A regenerated bundle that overlaps prior data inserts only events with new stable namespaced event keys.
+
+Team bundles are allow-list based. They may include stable user/machine identifiers, project name, session identifiers, source/model names, token/cache metrics, monetary metrics already normalized by AgentScope, tool-call metadata, agent evidence and optimizer metrics. They do **not** include prompt bodies, assistant responses, source code, tool payloads/results, attachments, environment variables, secrets, raw provider metadata or source file paths.
+
+See [`docs/team-bundle.md`](docs/team-bundle.md) for the exact privacy and idempotency contract.
+
 ## Output
 
 Default database:
@@ -292,6 +319,7 @@ The V2 multi-source/team design and ordered implementation plans are in:
 docs/superpowers/specs/2026-08-18-multi-source-team-analytics-design.md
 docs/superpowers/plans/2026-08-18-agentscope-v2-roadmap.md
 docs/provider-support.md
+docs/team-bundle.md
 ```
 
 ## Current boundaries
@@ -306,4 +334,4 @@ AgentScope remains analytics-only. It does not:
 - provide a central team server;
 - provide a VS Code extension yet.
 
-The approved V2 roadmap adds offline sanitized team export/import before any central server is considered.
+The V2 team workflow consolidates sanitized bundles offline; a central server remains outside the current scope.
