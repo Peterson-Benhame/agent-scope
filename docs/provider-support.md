@@ -82,8 +82,20 @@ AGENTSCOPE_GEMINI_HOME
 
 If a source exists but the adapter cannot verify its local structure, discovery returns a diagnostic and does not ingest the records. `agentscope status` and `agentscope collect` surface these diagnostics. A supported source failing during collection is isolated from other adapters and produces an import error without rolling back successful imports from unrelated providers.
 
+## Team analytics implications
+
+Team analytics can aggregate only fields that reached the normalized local database and then passed the Team Bundle allow-list. Therefore a provider with sessions but no verified token or cost fields may appear in team session counts while token/cost metrics remain unavailable.
+
+The team report shows **observed coverage** by source (whether token/cache/cost data is present in the consolidated database). This is intentionally different from the adapter capabilities table above.
+
+Unsupported-format discovery diagnostics are local collection state and are not transported by Team Bundle version 1. Team reports label that diagnostic coverage as unavailable instead of inferring a value.
+
+Non-USD provider credits, multipliers, quotas or subscription concepts are never converted to `observed_cost_usd` without an explicit verified monetary contract.
+
 ## Privacy
 
 Provider adapters may persist normalized message content in the local SQLite database because local analytics can reconstruct source histories. The database must therefore be treated as sensitive.
 
-Safe reports/exports exclude full message bodies and tool payloads by default. The later Team Bundle layer is stricter: it uses an allow-list and must never export prompts, responses, source code, tool payloads, raw provider files, environment variables or secrets.
+Safe reports/exports exclude full message bodies and tool payloads by default. The Team Bundle layer is stricter: it uses an allow-list and must never export prompts, responses, source code, tool payloads, raw provider files, environment variables or secrets.
+
+See [`team-bundle.md`](team-bundle.md) and [`team-analytics.md`](team-analytics.md) for the offline consolidation and reporting contracts.
