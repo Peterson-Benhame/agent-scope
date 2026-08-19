@@ -5,11 +5,13 @@ from pathlib import Path
 
 from agentscope.analytics.dashboard import DashboardAnalyticsService
 from agentscope.analytics.filters import AnalyticsFilter
+from agentscope.billing import billing_semantics
 from agentscope.extension.contracts import (
     SNAPSHOT_SCHEMA,
     SNAPSHOT_VERSION,
     AvailabilityItem,
     SnapshotAvailability,
+    SnapshotBilling,
     SnapshotDimensions,
     SnapshotQuality,
     SnapshotSummary,
@@ -224,6 +226,7 @@ def build_extension_snapshot(
         estimated_cost=_availability(estimated_cost, "insufficient_pricing_data"),
         estimated_savings=_availability(estimated_savings, "no_optimization_data"),
     )
+    billing = billing_semantics(repository, filters)
 
     return {
         "schema": SNAPSHOT_SCHEMA,
@@ -250,6 +253,14 @@ def build_extension_snapshot(
                 observed_cost_usd=observed_cost,
                 estimated_cost_usd=estimated_cost,
                 estimated_savings_usd=estimated_savings,
+            )
+        ),
+        "billing": to_dict(
+            SnapshotBilling(
+                mode=billing.mode,
+                confidence=billing.confidence,
+                estimated_cost_basis=billing.estimated_cost_basis,
+                is_observed_spend=billing.is_observed_spend,
             )
         ),
         "availability": to_dict(availability),
