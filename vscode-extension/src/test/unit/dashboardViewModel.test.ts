@@ -8,6 +8,10 @@ const snapshot: ExtensionSnapshot = {
   version: 2,
   generated_at: '2026-08-19T14:00:00Z',
   database: 'agentscope.db',
+  freshness: {
+    last_imported_at: '2026-08-19 16:30:00',
+    artifacts_tracked: 129,
+  },
   filters: { period: '7d' },
   summary: {
     sessions: 77,
@@ -54,6 +58,12 @@ describe('dashboard view model', () => {
     assert.strictEqual(vm.cards.observedCost.value, 'US$ 13,78');
     assert.strictEqual(vm.cards.estimatedCost.value, 'US$ 21,03');
     assert.strictEqual(vm.cards.estimatedSavings.value, 'US$ 76,89');
+  });
+
+  it('shows the latest successful collection timestamp', () => {
+    const vm = toDashboardViewModel(snapshot, { period: '7d' });
+    assert.ok(vm.lastImportedLabel.startsWith('Última coleta:'));
+    assert.ok(vm.lastImportedLabel.includes('129 arquivos'));
   });
 
   it('shows unavailable values with an explanatory reason', () => {
