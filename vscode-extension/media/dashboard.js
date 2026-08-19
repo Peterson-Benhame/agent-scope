@@ -121,7 +121,7 @@
       article.className = 'card';
       const caption = document.createElement('span');
       caption.className = 'card-label';
-      caption.textContent = label;
+      caption.textContent = metric.label || label;
       const value = document.createElement('strong');
       value.className = 'card-value';
       value.textContent = metric.value;
@@ -292,7 +292,7 @@
   function renderNotes(vm) {
     notes.replaceChildren();
     const unavailable = cardDefinitions
-      .map(([key, label]) => ({ label, metric: vm.cards[key] }))
+      .map(([key, label]) => ({ label: vm.cards[key].label || label, metric: vm.cards[key] }))
       .filter(({ metric }) => metric.subtitle);
     if (!unavailable.length && vm.quality.import_errors === 0) return;
 
