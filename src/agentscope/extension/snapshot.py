@@ -5,7 +5,6 @@ from pathlib import Path
 
 from agentscope.analytics.dashboard import DashboardAnalyticsService
 from agentscope.analytics.filters import AnalyticsFilter
-from agentscope.analytics.service import AnalyticsService
 from agentscope.extension.contracts import (
     SNAPSHOT_SCHEMA,
     SNAPSHOT_VERSION,
@@ -205,10 +204,9 @@ def build_extension_snapshot(
     period: str | None,
     database_path: Path,
 ) -> dict[str, object]:
-    analytics = AnalyticsService(repository, filters)
     dashboard = DashboardAnalyticsService(repository, filters)
-    summary = analytics.summary()
-    quality = analytics.data_quality()
+    summary = dashboard.summary()
+    quality = dashboard.data_quality()
     optimization_confidence = quality.get("optimization_confidence", {})
     if not isinstance(optimization_confidence, dict):
         optimization_confidence = {}
