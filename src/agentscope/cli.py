@@ -11,31 +11,17 @@ import typer
 from agentscope.analytics.filters import AnalyticsFilter, resolve_period
 from agentscope.analytics.service import AnalyticsService
 from agentscope.config import AgentScopeConfig
-from agentscope.importer import ProgressEvent, collect_registered_sources
+from agentscope.importer import (
+    ProgressEvent,
+    collect_registered_sources,
+    discover_registered_sources,
+)
 from agentscope.reporting.export import export_datasets
 from agentscope.reporting.html_report import generate_html_report
-from agentscope.sources.base import DiscoveryContext
-from agentscope.sources.codex import CodexAdapter
-from agentscope.sources.headroom import HeadroomAdapter
-from agentscope.sources.registry import SourceRegistry
 from agentscope.storage.database import Database
 from agentscope.storage.repository import Repository
 
 app = typer.Typer(help="Local-first observability and analytics for agent execution histories.")
-
-
-def _source_registry() -> SourceRegistry:
-    return SourceRegistry([CodexAdapter(), HeadroomAdapter()])
-
-
-def _discovery_context(config: AgentScopeConfig) -> DiscoveryContext:
-    return DiscoveryContext(
-        user_home=config.codex_home.parent,
-        overrides={
-            "codex": config.codex_home,
-            "headroom": config.headroom_home,
-        },
-    )
 
 
 def _render_collect_progress(event: ProgressEvent) -> None:
@@ -141,7 +127,6 @@ def collect(
     summary = collect_registered_sources(
         repo,
         config,
-        registry=_source_registry(),
         full_rescan=full_rescan,
         progress=_render_collect_progress,
     )
@@ -150,6 +135,8 @@ def collect(
         f"files_skipped={summary.files_skipped} sessions_imported={summary.sessions_imported} "
         f"optimizations_imported={summary.optimizations_imported} errors={summary.errors}"
     )
+    for diagnostic in summary.diagnostics:
+        typer.echo(f"diagnostic={diagnostic}")
     if summary.errors:
         raise typer.Exit(code=1)
 
@@ -171,19 +158,19 @@ def status(
         errors = conn.execute("SELECT COUNT(*) AS n FROM import_errors").fetchone()["n"]
         imports = conn.execute("SELECT COUNT(*) AS n FROM import_state").fetchone()["n"]
 
-    registry = _source_registry()
-    discoveries = registry.discover(
-        _discovery_context(config),
-        enabled_sources=config.enabled_sources,
-    )
+    discoveries = discover_registered_sources(config)
     typer.echo(
         f"database={config.database_path} sessions={sessions} imports={imports} errors={errors}"
     )
     for discovery in discoveries:
         detected = "yes" if discovery.detected else "no"
-        typer.echo(
-            f"source={discovery.source} detected={detected} artifacts={len(discovery.artifacts)}"
+        line = (
+            f"source={discovery.source} detected={detected} "
+            f"artifacts={len(discovery.artifacts)}"
         )
+        if discovery.diagnostic:
+            line += f" diagnostic={discovery.diagnostic}"
+        typer.echo(line)
 
 
 @app.command()
