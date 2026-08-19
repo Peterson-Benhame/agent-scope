@@ -107,6 +107,66 @@ def _spawned_agent(input_text: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _tiktoken_fallback(
+    result: CodexCollectedSession,
+    path: Path,
+) -> NormalizedTokenUsage | None:
+    if result.token_usage:
+        return None
+
+    messages = [message for message in result.messages if message.content]
+    if not messages:
+        return None
+
+    try:
+        import tiktoken
+
+        model = result.session.model
+        try:
+            encoding = tiktoken.encoding_for_model(model) if model else tiktoken.get_encoding("o200k_base")
+        except KeyError:
+            encoding = tiktoken.get_encoding("o200k_base")
+
+        input_tokens = sum(
+            len(encoding.encode(str(message.content)))
+            for message in messages
+            if message.role != "assistant"
+        )
+        output_tokens = sum(
+            len(encoding.encode(str(message.content)))
+            for message in messages
+            if message.role == "assistant"
+        )
+    except Exception:
+        return None
+
+    if input_tokens + output_tokens <= 0:
+        return None
+
+    timestamp = max(
+        (message.timestamp for message in messages if message.timestamp),
+        default=result.session.started_at or "",
+    )
+    if not timestamp:
+        return None
+
+    return NormalizedTokenUsage(
+        timestamp=timestamp,
+        session_external_id=result.session.external_session_id,
+        model=result.session.model,
+        input_tokens=input_tokens,
+        cached_input_tokens=None,
+        cache_write_input_tokens=None,
+        output_tokens=output_tokens,
+        reasoning_output_tokens=None,
+        total_tokens=input_tokens + output_tokens,
+        context_window=None,
+        source_file=str(path),
+        source_line=0,
+        token_source="tiktoken_estimate",
+    )
+
+
 def collect_codex_rollout(path: Path) -> CodexCollectedSession:
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     session = NormalizedSession(
@@ -333,6 +393,7 @@ def collect_codex_rollout(path: Path) -> CodexCollectedSession:
                             context_window=info.get("model_context_window"),
                             source_file=str(path),
                             source_line=line_number,
+                            token_source="source_reported",
                         )
                     )
             elif payload.get("type") == "user_message":
@@ -355,4 +416,7 @@ def collect_codex_rollout(path: Path) -> CodexCollectedSession:
                             result.attachments.append(attachment)
 
     result.messages.extend(fallback_user_messages)
+    fallback_usage = _tiktoken_fallback(result, path)
+    if fallback_usage is not None:
+        result.token_usage.append(fallback_usage)
     return result
