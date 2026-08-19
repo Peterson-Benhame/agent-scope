@@ -2,7 +2,7 @@
 
 AgentScope is a local-first observability and analytics tool for agent execution histories.
 
-The V1 ingests OpenAI Codex session history and Headroom optimization metrics, normalizes them into SQLite, and produces safe CSV, JSON, and HTML analytics. The core model is provider-neutral so additional agent runtimes, tools, and optimizers can be added later without redefining the analytics layer.
+The current implementation ingests OpenAI Codex session history and Headroom optimization metrics, normalizes them into SQLite, and produces safe CSV, JSON, and HTML analytics. The core model is provider-neutral so additional agent runtimes, tools, and optimizers can be added without redefining the analytics layer.
 
 ## What it analyzes
 
@@ -14,13 +14,14 @@ The V1 ingests OpenAI Codex session history and Headroom optimization metrics, n
 - tool and MCP calls;
 - Headroom compression and cache savings;
 - source-reported and estimated costs without presenting estimates as billing facts;
-- trends by day, project, and model.
+- trends by day, project, and model;
+- filtered periods with comparison against the previous equivalent period.
 
 Headroom is modeled as an **Optimizer**, not an Agent.
 
 ## Privacy
 
-AgentScope is local-first and treats Codex and Headroom source files as read-only.
+AgentScope is local-first and treats provider source files as read-only.
 
 Safe metadata reporting is the default. Standard reports and exports do not include complete prompt bodies, assistant messages, tool inputs, or tool outputs. Full message export requires the explicit `--full-content` option.
 
@@ -66,7 +67,7 @@ Inspect source and database status:
 agentscope status
 ```
 
-Show the current aggregate analytics:
+Show aggregate analytics:
 
 ```powershell
 agentscope analyze
@@ -84,13 +85,56 @@ Generate the local HTML report:
 agentscope report
 ```
 
+### Filter analytics by period
+
+The `analyze`, `export`, and `report` commands share the same filters.
+
+```powershell
+agentscope report --period today
+agentscope report --period 7d
+agentscope report --period 30d
+agentscope report --period month
+```
+
+Use an inclusive custom range:
+
+```powershell
+agentscope report --from 2026-08-01 --to 2026-08-18
+```
+
+Custom `--from`/`--to` values override `--period`. Dates use ISO `YYYY-MM-DD` and are inclusive. With no period/date filter, AgentScope preserves the all-history behavior.
+
+Filters can also restrict project, model, and source:
+
+```powershell
+agentscope analyze --project BN.S584.PerfilInvestidor --period 30d
+agentscope export --model gpt-5.6-terra --period month
+agentscope report --source codex --from 2026-08-01 --to 2026-08-18
+```
+
+The filtered HTML report displays the selected period and, for bounded periods, compares key metrics with the immediately preceding equivalent period.
+
+### Report number and cost formatting
+
+The HTML report uses pt-BR display conventions without changing numeric precision stored in SQLite:
+
+```text
+integer:      1.465.312.344
+percentage:   94,63%
+USD summary:  US$ 13,78
+```
+
+Detailed technical values may preserve additional decimal precision when useful. Observed/source-reported costs remain distinct from estimated values and estimated savings.
+
 Explicitly export full message content:
 
 ```powershell
 agentscope export --full-content
 ```
 
-Custom paths are supported:
+When filters are used with `--full-content`, the full-message export obeys the same selected filters.
+
+Custom source/database paths are supported:
 
 ```powershell
 agentscope collect `
@@ -165,24 +209,32 @@ separately.
 Run the full test suite:
 
 ```powershell
-python -m pytest
+python -m pytest -q
 ```
 
 The test fixtures are synthetic and sanitized. Personal Codex histories are not committed.
 
 ## Project documentation
 
-The V1 specifications are in [`docs/specs`](docs/specs/README.md). The implementation plan is in [`docs/superpowers/plans`](docs/superpowers/plans/2026-08-18-agentscope-v1.md).
+The V1 specifications are in [`docs/specs`](docs/specs/README.md).
 
-## V1 boundaries
+The V2 multi-source/team design and ordered implementation plans are in:
 
-The current release is analytics-only. It does not:
+```text
+docs/superpowers/specs/2026-08-18-multi-source-team-analytics-design.md
+docs/superpowers/plans/2026-08-18-agentscope-v2-roadmap.md
+```
+
+## Current boundaries
+
+AgentScope remains analytics-only. It does not:
 
 - route prompts;
 - select agents or models;
 - recommend models;
-- modify Codex or Headroom;
+- modify provider histories;
 - expose an HTTP API;
+- provide a central team server;
 - provide a VS Code extension yet.
 
-A future VS Code extension can consume the SQLite/JSON/CLI outputs without changing the V1 ingestion model.
+The approved V2 roadmap adds provider adapters and offline sanitized team export/import before any central server is considered.
