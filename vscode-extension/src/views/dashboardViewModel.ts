@@ -110,10 +110,11 @@ export function toDashboardViewModel(
   snapshot: ExtensionSnapshot,
   filters: SnapshotFilters,
 ): DashboardViewModel {
+  const freshnessLabel = lastImportedLabel(snapshot);
   return {
     generatedAt: snapshot.generated_at,
-    database: snapshot.database,
-    lastImportedLabel: lastImportedLabel(snapshot),
+    database: `${snapshot.database} · ${freshnessLabel}`,
+    lastImportedLabel: freshnessLabel,
     filters,
     isEmpty: snapshot.summary.sessions === 0,
     cards: {
