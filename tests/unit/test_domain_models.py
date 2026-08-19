@@ -1,3 +1,4 @@
+from agentscope.domain.model_normalization import normalize_model_name
 from agentscope.domain.models import (
     AgentEvidence,
     CorrelationConfidence,
@@ -44,3 +45,16 @@ def test_agent_and_skill_evidence_require_explicit_evidence_type():
     )
     assert agent.evidence_type == "session_meta"
     assert skill.usage_type is SkillUsageType.INVOKED
+
+
+def test_model_normalization_preserves_explicit_model_identifiers():
+    assert normalize_model_name(" gpt-5.6-terra ") == "gpt-5.6-terra"
+    assert normalize_model_name("GPT-5.5") == "gpt-5.5"
+    assert normalize_model_name("claude-sonnet-4") == "claude-sonnet-4"
+
+
+def test_model_normalization_rejects_empty_and_review_labels():
+    assert normalize_model_name(None) is None
+    assert normalize_model_name("   ") is None
+    assert normalize_model_name("revisão automática do codex") is None
+    assert normalize_model_name("automatic codex review") is None
