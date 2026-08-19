@@ -49,9 +49,9 @@ def make_repo(tmp_path: Path) -> tuple[Repository, Database]:
         conn.execute(
             """
             INSERT INTO costs(
-                session_id, model_id, period_start, observed_cost_usd,
-                total_savings_usd, event_key
-            ) VALUES(?, ?, '2026-08-18T10:00:00Z', 0.12, 0.03, 'cost-a')
+                session_id, model_id, period_start, estimated_raw_cost_usd,
+                observed_cost_usd, total_savings_usd, event_key
+            ) VALUES(?, ?, '2026-08-18T10:00:00Z', 0.20, 0.12, 0.03, 'cost-a')
             """,
             (session_id, model_id),
         )
@@ -84,7 +84,7 @@ def make_repo(tmp_path: Path) -> tuple[Repository, Database]:
     return Repository(db), db
 
 
-def test_build_extension_snapshot_has_stable_allow_listed_contract(tmp_path):
+def test_build_extension_snapshot_has_stable_allow_listed_v2_contract(tmp_path):
     repo, db = make_repo(tmp_path)
     snapshot = build_extension_snapshot(
         repo,
@@ -94,11 +94,22 @@ def test_build_extension_snapshot_has_stable_allow_listed_contract(tmp_path):
     )
 
     assert snapshot["schema"] == "agentscope-extension-snapshot"
-    assert snapshot["version"] == 1
+    assert snapshot["version"] == 2
     assert snapshot["summary"]["sessions"] == 1
     assert snapshot["summary"]["total_tokens"] == 150
     assert snapshot["summary"]["observed_cost_usd"] == 0.12
+    assert snapshot["summary"]["estimated_cost_usd"] == 0.20
     assert snapshot["summary"]["estimated_savings_usd"] == 0.03
+    assert snapshot["availability"]["observed_cost"] == {"available": True, "reason": None}
+    assert snapshot["availability"]["estimated_cost"] == {"available": True, "reason": None}
+    assert snapshot["availability"]["estimated_savings"] == {"available": True, "reason": None}
+    assert snapshot["series"]["daily"][0]["date"] == "2026-08-18"
+    assert snapshot["series"]["daily"][0]["total_tokens"] == 150
+    assert snapshot["breakdowns"]["projects"] == [
+        {"project": "example-project", "sessions": 1, "total_tokens": 150}
+    ]
+    assert snapshot["breakdowns"]["models"][0]["model"] == "gpt-example"
+    assert snapshot["breakdowns"]["sources"][0]["source"] == "codex"
     assert "example-project" in snapshot["dimensions"]["projects"]
     assert "codex" in snapshot["dimensions"]["sources"]
 
@@ -107,7 +118,7 @@ def test_build_extension_snapshot_has_stable_allow_listed_contract(tmp_path):
     assert r"C:\private\provider\rollout.jsonl" not in serialized
 
 
-def test_extension_snapshot_keeps_unknown_money_null(tmp_path):
+def test_extension_snapshot_keeps_unknown_money_null_with_reason_codes(tmp_path):
     repo, db = make_repo(tmp_path)
     snapshot = build_extension_snapshot(
         repo,
@@ -118,4 +129,33 @@ def test_extension_snapshot_keeps_unknown_money_null(tmp_path):
 
     assert snapshot["summary"]["sessions"] == 1
     assert snapshot["summary"]["observed_cost_usd"] is None
+    assert snapshot["summary"]["estimated_cost_usd"] is None
     assert snapshot["summary"]["estimated_savings_usd"] is None
+    assert snapshot["availability"]["observed_cost"] == {
+        "available": False,
+        "reason": "source_does_not_report_cost",
+    }
+    assert snapshot["availability"]["estimated_cost"] == {
+        "available": False,
+        "reason": "insufficient_pricing_data",
+    }
+    assert snapshot["availability"]["estimated_savings"] == {
+        "available": False,
+        "reason": "no_optimization_data",
+    }
+
+
+def test_extension_snapshot_empty_filter_returns_empty_chart_collections(tmp_path):
+    repo, db = make_repo(tmp_path)
+    snapshot = build_extension_snapshot(
+        repo,
+        AnalyticsFilter(project="missing-project"),
+        period=None,
+        database_path=db.path,
+    )
+
+    assert snapshot["summary"]["sessions"] == 0
+    assert snapshot["series"]["daily"] == []
+    assert snapshot["breakdowns"]["projects"] == []
+    assert snapshot["breakdowns"]["models"] == []
+    assert snapshot["breakdowns"]["sources"] == []
