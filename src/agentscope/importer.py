@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from agentscope.collectors.codex import collect_codex_rollout
 from agentscope.collectors.headroom import collect_headroom
@@ -18,6 +19,23 @@ class ImportSummary:
     sessions_imported: int = 0
     optimizations_imported: int = 0
     errors: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ProgressEvent:
+    stage: str
+    current: int
+    total: int
+    source: str | None = None
+    current_file: str | None = None
+
+
+ProgressCallback = Callable[[ProgressEvent], None]
+
+
+def _emit(progress: ProgressCallback | None, event: ProgressEvent) -> None:
+    if progress is not None:
+        progress(event)
 
 
 def _hash_file(path: Path) -> str:
@@ -90,29 +108,58 @@ def collect_sources(
     codex_home: Path | None = None,
     headroom_home: Path | None = None,
     full_rescan: bool = False,
+    progress: ProgressCallback | None = None,
 ) -> ImportSummary:
     summary = ImportSummary()
+    _emit(progress, ProgressEvent(stage="discovering", current=0, total=0))
 
+    codex_files: list[Path] = []
     if codex_home:
         sessions_root = codex_home / "sessions"
         if sessions_root.exists():
-            for path in sorted(sessions_root.rglob("*.jsonl")):
-                summary.files_seen += 1
-                try:
-                    digest = _hash_file(path)
-                    if not full_rescan and _unchanged(repository, "codex", path, digest):
-                        summary.files_skipped += 1
-                        continue
-                    _import_codex_file(repository, path)
-                    _save_state(repository, "codex", path, digest)
-                    summary.files_imported += 1
-                    summary.sessions_imported += 1
-                except Exception as exc:
-                    summary.errors += 1
-                    repository.record_import_error("codex", str(path), None, "import", str(exc))
+            codex_files = sorted(sessions_root.rglob("*.jsonl"))
 
+    headroom_files: list[Path] = []
     if headroom_home and headroom_home.exists():
-        source_files = [p for p in [headroom_home / "proxy_savings.json", *sorted(headroom_home.glob("*.jsonl"))] if p.exists()]
+        headroom_files = [
+            p
+            for p in [headroom_home / "proxy_savings.json", *sorted(headroom_home.glob("*.jsonl"))]
+            if p.exists()
+        ]
+
+    total_files = len(codex_files) + len(headroom_files)
+    processed_files = 0
+    _emit(progress, ProgressEvent(stage="collecting", current=0, total=total_files))
+
+    for path in codex_files:
+        summary.files_seen += 1
+        try:
+            digest = _hash_file(path)
+            if not full_rescan and _unchanged(repository, "codex", path, digest):
+                summary.files_skipped += 1
+            else:
+                _import_codex_file(repository, path)
+                _save_state(repository, "codex", path, digest)
+                summary.files_imported += 1
+                summary.sessions_imported += 1
+        except Exception as exc:
+            summary.errors += 1
+            repository.record_import_error("codex", str(path), None, "import", str(exc))
+        finally:
+            processed_files += 1
+            _emit(
+                progress,
+                ProgressEvent(
+                    stage="collecting",
+                    current=processed_files,
+                    total=total_files,
+                    source="codex",
+                    current_file=str(path),
+                ),
+            )
+
+    if headroom_home and headroom_files:
+        source_files = headroom_files
         changed = full_rescan or not source_files
         digests: dict[Path, str] = {}
         for path in source_files:
@@ -157,5 +204,20 @@ def collect_sources(
             for path, digest in digests.items():
                 _save_state(repository, "headroom", path, digest)
                 summary.files_imported += 1
+
+        for path in source_files:
+            processed_files += 1
+            _emit(
+                progress,
+                ProgressEvent(
+                    stage="collecting",
+                    current=processed_files,
+                    total=total_files,
+                    source="headroom",
+                    current_file=str(path),
+                ),
+            )
+
+    _emit(progress, ProgressEvent(stage="complete", current=processed_files, total=total_files))
 
     return summary
