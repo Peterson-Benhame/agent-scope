@@ -253,7 +253,10 @@ def _build_records(
 
         cost_date, cost_date_params = _event_date_clause(
             filters,
-            "COALESCE(c.period_start, c.period_end)",
+            "COALESCE("
+            "c.period_start, c.period_end, "
+            "(SELECT sx.started_at FROM sessions sx WHERE sx.id=c.session_id)"
+            ")",
         )
         cost_rows = conn.execute(
             f"""
