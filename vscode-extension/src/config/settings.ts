@@ -1,4 +1,3 @@
-import * as vscode from 'vscode';
 import { Period } from '../contracts/snapshot';
 
 export interface AgentScopeSettings {
@@ -26,6 +25,7 @@ export function normalizeSettings(values: Partial<AgentScopeSettings>): AgentSco
 }
 
 export function readSettings(): AgentScopeSettings {
+  const vscode = require('vscode') as typeof import('vscode');
   const config = vscode.workspace.getConfiguration('agentscope');
   return normalizeSettings({
     executablePath: config.get<string>('executablePath'),
@@ -37,6 +37,7 @@ export function readSettings(): AgentScopeSettings {
 }
 
 export async function setDatabasePath(path: string): Promise<void> {
+  const vscode = require('vscode') as typeof import('vscode');
   await vscode.workspace
     .getConfiguration('agentscope')
     .update('databasePath', path, vscode.ConfigurationTarget.Global);
