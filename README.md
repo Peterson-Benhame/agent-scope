@@ -2,7 +2,7 @@
 
 AgentScope is a local-first observability and analytics tool for agent execution histories.
 
-The current implementation ingests OpenAI Codex session history and Headroom optimization metrics, normalizes them into SQLite, and produces safe CSV, JSON, and HTML analytics. The core model is provider-neutral so additional agent runtimes, tools, and optimizers can be added without redefining the analytics layer.
+The current implementation ingests OpenAI Codex session history and Headroom optimization metrics, normalizes them into SQLite, and produces safe CSV, JSON, and HTML analytics. Source collection is provider-neutral through a `SourceAdapter` registry so additional agent runtimes, tools, and optimizers can be added without redefining the analytics layer.
 
 ## What it analyzes
 
@@ -51,6 +51,29 @@ python -m pip install -e ".[dev]"
 
 AgentScope never modifies these source files.
 
+### Source adapters
+
+`agentscope collect` discovers enabled source adapters before collection. The current implemented adapters are:
+
+- `codex` — sessions, messages, tokens/cache, tools, agents and skills when explicit evidence exists;
+- `headroom` — optimizer events, cache metrics and source-reported cost/savings data.
+
+All registered sources are enabled by default. To restrict collection, set the comma-separated `AGENTSCOPE_SOURCES` environment variable:
+
+```powershell
+$env:AGENTSCOPE_SOURCES = "codex"
+agentscope collect
+```
+
+Or enable both current sources explicitly:
+
+```powershell
+$env:AGENTSCOPE_SOURCES = "codex,headroom"
+agentscope collect
+```
+
+A disabled adapter is not discovered or collected. `agentscope status` reports whether each enabled source was detected and how many supported artifacts were found.
+
 ## CLI
 
 Collect new or changed local data:
@@ -59,7 +82,7 @@ Collect new or changed local data:
 agentscope collect
 ```
 
-During collection, AgentScope shows discovery status and an overall progress bar with the current source/file until it reaches 100%.
+During collection, AgentScope reports detected sources and shows an overall progress bar until it reaches 100%.
 
 Inspect source and database status:
 
@@ -237,4 +260,4 @@ AgentScope remains analytics-only. It does not:
 - provide a central team server;
 - provide a VS Code extension yet.
 
-The approved V2 roadmap adds provider adapters and offline sanitized team export/import before any central server is considered.
+The approved V2 roadmap adds more provider adapters and offline sanitized team export/import before any central server is considered.
