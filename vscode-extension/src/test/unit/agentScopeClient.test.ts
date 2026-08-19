@@ -22,6 +22,12 @@ const validSnapshot = JSON.stringify({
     estimated_cost_usd: null,
     estimated_savings_usd: null,
   },
+  billing: {
+    mode: 'unknown',
+    confidence: 'unknown',
+    estimated_cost_basis: 'openai_api_equivalent',
+    is_observed_spend: false,
+  },
   availability: {
     observed_cost: { available: false, reason: 'source_does_not_report_cost' },
     estimated_cost: { available: false, reason: 'insufficient_pricing_data' },
