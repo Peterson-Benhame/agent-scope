@@ -20,6 +20,7 @@ class AgentScopeConfig:
     enabled_sources: frozenset[str] | None = None
     user_display_name: str | None = None
     machine_display_name: str | None = None
+    monthly_budget_usd: float | None = None
 
     @classmethod
     def from_env(
@@ -37,6 +38,7 @@ class AgentScopeConfig:
         enabled_sources: frozenset[str] | set[str] | None = None,
         user_display_name: str | None = None,
         machine_display_name: str | None = None,
+        monthly_budget_usd: float | None = None,
     ) -> "AgentScopeConfig":
         base = Path(base_dir or Path.cwd())
         user_home = Path(
@@ -111,6 +113,17 @@ class AgentScopeConfig:
             else os.environ.get("AGENTSCOPE_MACHINE_NAME")
         )
 
+        resolved_budget = monthly_budget_usd
+        if resolved_budget is None:
+            raw_budget = os.environ.get("AGENTSCOPE_MONTHLY_BUDGET_USD")
+            if raw_budget is not None and raw_budget.strip():
+                try:
+                    resolved_budget = float(raw_budget)
+                except ValueError as exc:
+                    raise ValueError("monthly budget must be a valid number") from exc
+        if resolved_budget is not None and resolved_budget < 0:
+            raise ValueError("monthly budget must be non-negative")
+
         return cls(
             codex_home=codex,
             headroom_home=headroom,
@@ -129,4 +142,5 @@ class AgentScopeConfig:
             ),
             user_display_name=resolved_user_name,
             machine_display_name=resolved_machine_name,
+            monthly_budget_usd=resolved_budget,
         )
