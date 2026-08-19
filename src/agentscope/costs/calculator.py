@@ -76,6 +76,7 @@ def _usage_rows(
                    tu.cached_input_tokens,
                    tu.cache_write_input_tokens,
                    tu.output_tokens,
+                   COALESCE(tu.token_source, 'source_reported') AS token_source,
                    uc.provider AS usage_provider
             FROM token_usage tu
             JOIN sessions s ON s.id=tu.session_id
@@ -227,6 +228,10 @@ def calculate_token_usage_costs(
     priced = 0
 
     for row in rows:
+        if row.get("token_source") == "tiktoken_estimate":
+            reasons["estimated_token_usage"] += 1
+            continue
+
         reason, input_tokens, cached_tokens, cache_write_tokens, output_tokens = _classify_usage(row)
         if reason is not None:
             reasons[reason] += 1
