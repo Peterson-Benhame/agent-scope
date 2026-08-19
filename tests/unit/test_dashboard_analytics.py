@@ -40,7 +40,15 @@ def _ids(db):
         }
 
 
-def _insert_session(db, external_id, started_at, *, with_usage=True, with_money=True):
+def _insert_session(
+    db,
+    external_id,
+    started_at,
+    *,
+    with_usage=True,
+    with_money=True,
+    activity_day=None,
+):
     ids = _ids(db)
     with db.connect() as conn:
         conn.execute(
@@ -59,7 +67,7 @@ def _insert_session(db, external_id, started_at, *, with_usage=True, with_money=
             "SELECT id FROM sessions WHERE external_session_id=?",
             (external_id,),
         ).fetchone()[0]
-        day = started_at[:10]
+        day = activity_day or started_at[:10]
         if with_usage:
             conn.execute(
                 """
@@ -124,6 +132,40 @@ def test_by_day_keeps_session_without_token_or_money_events(tmp_path):
             "estimated_cost_usd": None,
             "estimated_savings_usd": None,
         }
+    ]
+
+
+def test_session_with_usage_inside_period_is_active_even_if_started_before_period(tmp_path):
+    db, repo = _repo(tmp_path)
+    _insert_session(
+        db,
+        "cross-period",
+        "2026-08-12T22:00:00Z",
+        activity_day="2026-08-13",
+        with_money=False,
+    )
+    filters = AnalyticsFilter(
+        from_date=date(2026, 8, 13),
+        to_date=date(2026, 8, 13),
+        user="Dev A",
+        machine="Notebook A",
+    )
+    analytics = DashboardAnalyticsService(repo, filters)
+
+    assert analytics.summary().sessions == 1
+    assert analytics.by_day() == [
+        {
+            "date": "2026-08-13",
+            "sessions": 1,
+            "total_tokens": 150,
+            "cache_ratio": 0.8,
+            "observed_cost_usd": None,
+            "estimated_cost_usd": None,
+            "estimated_savings_usd": None,
+        }
+    ]
+    assert analytics.by_source() == [
+        {"source": "codex", "sessions": 1, "total_tokens": 150}
     ]
 
 
