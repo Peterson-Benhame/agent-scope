@@ -24,6 +24,7 @@ const snapshot: ExtensionSnapshot = {
 describe('dashboard view model', () => {
   it('formats executive cards using pt-BR presentation', () => {
     const vm = toDashboardViewModel(snapshot, { period: '7d' });
+    assert.strictEqual(vm.isEmpty, false);
     assert.strictEqual(vm.cards.sessions, '77');
     assert.strictEqual(vm.cards.totalTokens, '1.465.312.344');
     assert.strictEqual(vm.cards.tokensSaved, '1.234');
@@ -38,5 +39,20 @@ describe('dashboard view model', () => {
       summary: { ...snapshot.summary, observed_cost_usd: null },
     }, { period: '7d' });
     assert.strictEqual(vm.cards.observedCost, 'Não disponível');
+  });
+
+  it('marks a zero-session snapshot as empty', () => {
+    const vm = toDashboardViewModel({
+      ...snapshot,
+      summary: {
+        sessions: 0,
+        total_tokens: 0,
+        tokens_saved: 0,
+        cache_ratio: null,
+        observed_cost_usd: null,
+        estimated_savings_usd: null,
+      },
+    }, { period: '7d' });
+    assert.strictEqual(vm.isEmpty, true);
   });
 });
