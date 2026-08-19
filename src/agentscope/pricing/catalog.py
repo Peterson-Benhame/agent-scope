@@ -268,18 +268,25 @@ def _install_history_rows(
 
 def install_official_openai_history(repository: Repository) -> int:
     """Install provider-declared GPT-5.6 API prices with their effective dates."""
-    launch_rows = (
-        *_context_rows("gpt-5.6-sol", 5.0, 0.50, 30.0),
+    pre_reduction_rows = (
         *_context_rows("gpt-5.6-terra", 2.50, 0.25, 15.0),
         *_context_rows("gpt-5.6-luna", 1.0, 0.10, 6.0),
     )
-    reduced_rows = (
+    current_rows = (
         *_context_rows("gpt-5.6-terra", 2.0, 0.20, 12.0),
         *_context_rows("gpt-5.6-luna", 0.20, 0.02, 1.20),
     )
     inserted = _install_history_rows(
         repository,
-        rows=launch_rows,
+        rows=_context_rows("gpt-5.6-sol", 5.0, 0.50, 30.0),
+        valid_from=date(2026, 7, 9),
+        valid_to=None,
+        source_url=_LAUNCH_SOURCE_URL,
+        source_version=_LAUNCH_VERSION,
+    )
+    inserted += _install_history_rows(
+        repository,
+        rows=pre_reduction_rows,
         valid_from=date(2026, 7, 9),
         valid_to=date(2026, 7, 29),
         source_url=_LAUNCH_SOURCE_URL,
@@ -287,38 +294,12 @@ def install_official_openai_history(repository: Repository) -> int:
     )
     inserted += _install_history_rows(
         repository,
-        rows=reduced_rows,
+        rows=current_rows,
         valid_from=date(2026, 7, 30),
         valid_to=None,
         source_url=_REDUCED_SOURCE_URL,
         source_version=_REDUCED_VERSION,
     )
-    # Sol remained unchanged after July 30; keep its launch record open-ended.
-    catalog = PricingCatalog(repository)
-    sol_hash = _provenance_hash(_LAUNCH_SOURCE_URL, _LAUNCH_VERSION)
-    for model, context_type, input_price, cached_price, cache_write, output_price in _context_rows(
-        "gpt-5.6-sol", 5.0, 0.50, 30.0
-    ):
-        # The launch rows above end on July 29 so Terra/Luna can switch cleanly.
-        # Add an open-ended Sol record from launch because its price did not change.
-        if catalog.add_price(
-            provider="openai",
-            model=model,
-            pricing_scope=OPENAI_API_STANDARD_SCOPE,
-            service_tier="standard",
-            context_type=context_type,
-            input_per_1m_usd=input_price,
-            cached_input_per_1m_usd=cached_price,
-            cache_write_per_1m_usd=cache_write,
-            output_per_1m_usd=output_price,
-            valid_from=date(2026, 7, 9),
-            valid_to=None,
-            valid_from_basis="provider_declared",
-            source_url=_LAUNCH_SOURCE_URL,
-            source_version=_LAUNCH_VERSION,
-            source_hash=sol_hash,
-        ):
-            inserted += 1
     return inserted
 
 
