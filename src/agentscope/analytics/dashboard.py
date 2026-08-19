@@ -85,9 +85,99 @@ class DashboardAnalyticsService(AnalyticsService):
             for row in [*started_rows, *usage_rows]
         }
 
+    def estimated_cost_coverage(self) -> dict[str, object]:
+        where, params = self._usage_where("tu.timestamp")
+        with self.repository.database.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS events_total,
+                       COALESCE(SUM(
+                           CASE WHEN ec.estimated_raw_cost_usd IS NOT NULL THEN 1 ELSE 0 END
+                       ), 0) AS events_priced,
+                       SUM(ec.estimated_raw_cost_usd) AS known_estimated_cost_usd
+                FROM token_usage tu
+                JOIN sessions s ON s.id=tu.session_id
+                LEFT JOIN projects p ON p.id=s.project_id
+                LEFT JOIN models tm ON tm.id=tu.model_id
+                LEFT JOIN models sm ON sm.id=s.model_id
+                JOIN sources src ON src.id=s.source_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
+                LEFT JOIN costs ec
+                  ON ec.event_key='token_usage_cost:' || CAST(tu.id AS TEXT)
+                """ + where,
+                params,
+            ).fetchone()
+        total = int(row["events_total"] or 0)
+        priced = int(row["events_priced"] or 0)
+        known = (
+            float(row["known_estimated_cost_usd"])
+            if row["known_estimated_cost_usd"] is not None
+            else None
+        )
+        return {
+            "events_total": total,
+            "events_priced": priced,
+            "known_estimated_cost_usd": known,
+            "complete": total > 0 and priced == total,
+        }
+
+    def _estimated_cost_coverage_by_day(self) -> dict[str, dict[str, object]]:
+        usage_day = self.filters.local_date_expression("tu.timestamp")
+        where, params = self._usage_where("tu.timestamp")
+        with self.repository.database.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {usage_day} AS day,
+                       COUNT(*) AS events_total,
+                       COALESCE(SUM(
+                           CASE WHEN ec.estimated_raw_cost_usd IS NOT NULL THEN 1 ELSE 0 END
+                       ), 0) AS events_priced,
+                       SUM(ec.estimated_raw_cost_usd) AS known_estimated_cost_usd
+                FROM token_usage tu
+                JOIN sessions s ON s.id=tu.session_id
+                LEFT JOIN projects p ON p.id=s.project_id
+                LEFT JOIN models tm ON tm.id=tu.model_id
+                LEFT JOIN models sm ON sm.id=s.model_id
+                JOIN sources src ON src.id=s.source_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
+                LEFT JOIN costs ec
+                  ON ec.event_key='token_usage_cost:' || CAST(tu.id AS TEXT)
+                """ + where + f"""
+                GROUP BY {usage_day}
+                ORDER BY day
+                """,
+                params,
+            ).fetchall()
+        result: dict[str, dict[str, object]] = {}
+        for row in rows:
+            total = int(row["events_total"] or 0)
+            priced = int(row["events_priced"] or 0)
+            result[str(row["day"])] = {
+                "events_total": total,
+                "events_priced": priced,
+                "known_estimated_cost_usd": (
+                    float(row["known_estimated_cost_usd"])
+                    if row["known_estimated_cost_usd"] is not None
+                    else None
+                ),
+                "complete": total > 0 and priced == total,
+            }
+        return result
+
     def summary(self) -> AnalyticsSummary:
         summary = super().summary()
         summary.sessions = len(self._active_session_ids())
+        coverage = self.estimated_cost_coverage()
+        priced = int(coverage["events_priced"])
+        if priced > 0:
+            summary.estimated_raw_cost_usd = (
+                float(coverage["known_estimated_cost_usd"])
+                if coverage["complete"]
+                and coverage["known_estimated_cost_usd"] is not None
+                else None
+            )
         return summary
 
     def by_project(self) -> list[dict[str, Any]]:
@@ -325,6 +415,7 @@ class DashboardAnalyticsService(AnalyticsService):
         usage = {str(row["day"]): dict(row) for row in usage_rows}
         costs = {str(row["day"]): dict(row) for row in cost_rows}
         optimizations = {str(row["day"]): dict(row) for row in optimization_rows}
+        coverage_by_day = self._estimated_cost_coverage_by_day()
         days = sorted(set(sessions) | set(usage) | set(costs) | set(optimizations))
 
         result: list[dict[str, Any]] = []
@@ -332,8 +423,21 @@ class DashboardAnalyticsService(AnalyticsService):
             usage_row = usage.get(day)
             cost_row = costs.get(day)
             optimization_row = optimizations.get(day)
+            coverage = coverage_by_day.get(day)
             input_tokens = int(usage_row["input_tokens"] or 0) if usage_row else 0
             cached_tokens = int(usage_row["cached_input_tokens"] or 0) if usage_row else 0
+            estimated_cost = (
+                float(cost_row["estimated_cost_usd"])
+                if cost_row and cost_row["estimated_cost_usd"] is not None
+                else None
+            )
+            if coverage is not None and int(coverage["events_priced"]) > 0:
+                estimated_cost = (
+                    float(coverage["known_estimated_cost_usd"])
+                    if coverage["complete"]
+                    and coverage["known_estimated_cost_usd"] is not None
+                    else None
+                )
             result.append(
                 {
                     "date": day,
@@ -345,11 +449,7 @@ class DashboardAnalyticsService(AnalyticsService):
                         if cost_row and cost_row["observed_cost_usd"] is not None
                         else None
                     ),
-                    "estimated_cost_usd": (
-                        float(cost_row["estimated_cost_usd"])
-                        if cost_row and cost_row["estimated_cost_usd"] is not None
-                        else None
-                    ),
+                    "estimated_cost_usd": estimated_cost,
                     "estimated_savings_usd": self._known_savings(
                         cost_row,
                         optimization_row,
