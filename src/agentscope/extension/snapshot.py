@@ -86,11 +86,12 @@ def _scope_clauses(
 ) -> tuple[list[str], list[object]]:
     clauses: list[str] = []
     params: list[object] = []
+    local_day = filters.local_date_expression(date_expression)
     if filters.from_date is not None:
-        clauses.append(f"substr({date_expression}, 1, 10) >= ?")
+        clauses.append(f"{local_day} >= ?")
         params.append(filters.from_date.isoformat())
     if filters.to_date is not None:
-        clauses.append(f"substr({date_expression}, 1, 10) <= ?")
+        clauses.append(f"{local_day} <= ?")
         params.append(filters.to_date.isoformat())
     if filters.project is not None:
         clauses.append("p.name = ?")
