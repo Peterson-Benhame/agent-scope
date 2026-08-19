@@ -72,6 +72,14 @@ def repo_with_cross_day_events(tmp_path):
             """,
             (inside_id,),
         )
+        conn.execute(
+            """
+            INSERT INTO costs(
+                session_id, observed_cost_usd, event_key
+            ) VALUES(?, 2.5, 'undated-inside-cost')
+            """,
+            (inside_id,),
+        )
     return Repository(db)
 
 
@@ -100,3 +108,16 @@ def test_team_bundle_date_filter_excludes_event_after_selected_day(tmp_path):
         for row in bundle["records"]["token_usage"]
     )
     assert sum(row["total_tokens"] for row in bundle["records"]["token_usage"]) == 350
+
+
+def test_team_bundle_date_filter_uses_session_start_for_undated_cost(tmp_path):
+    bundle = build_team_bundle(
+        repo_with_cross_day_events(tmp_path),
+        AnalyticsFilter(from_date=date(2026, 8, 18), to_date=date(2026, 8, 18)),
+    )
+
+    costs = bundle["records"]["costs"]
+    assert len(costs) == 1
+    assert costs[0]["observed_cost_usd"] == 2.5
+    assert costs[0]["period_start"] is None
+    assert costs[0]["period_end"] is None
