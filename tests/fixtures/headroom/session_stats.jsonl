@@ -1,0 +1,2 @@
+{"type":"compress","input_tokens":5000,"output_tokens":2000,"savings_percent":60.0,"strategy":"router:search","timestamp":1787090000.0,"pid":321}
+{"type":"retrieve","hash":"abc123","timestamp":1787090001.0,"pid":321}
