@@ -74,6 +74,29 @@ def test_rejects_forbidden_content_or_payload_fields_anywhere(tmp_path):
             validate_team_bundle(bundle)
 
 
+def test_rejects_unknown_top_level_field_even_when_name_is_not_forbidden(tmp_path):
+    bundle = valid_bundle(tmp_path)
+    bundle["secret_data"] = "SHOULD_NOT_TRAVEL"
+
+    with pytest.raises(TeamBundleValidationError, match="unexpected field"):
+        validate_team_bundle(bundle)
+
+
+def test_rejects_unknown_record_field_even_when_name_is_not_forbidden(tmp_path):
+    bundle = valid_bundle(tmp_path)
+    bundle["records"]["sessions"] = [
+        {
+            "session_key": "session-key",
+            "external_session_id": "s1",
+            "source": "codex",
+            "custom_private_data": "SHOULD_NOT_TRAVEL",
+        }
+    ]
+
+    with pytest.raises(TeamBundleValidationError, match="unexpected field"):
+        validate_team_bundle(bundle)
+
+
 def test_rejects_tampered_bundle_id(tmp_path):
     bundle = valid_bundle(tmp_path)
     bundle["bundle_id"] = "0" * 64
