@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
+from agentscope.domain.models import NormalizedMachine, NormalizedUser
+
 
 ProgressCallback = Callable[[Any], None]
 
@@ -44,6 +46,8 @@ class CollectRequest:
     discovery: SourceDiscovery
     full_rescan: bool = False
     progress: ProgressCallback | None = None
+    user: NormalizedUser | None = None
+    machine: NormalizedMachine | None = None
 
 
 @dataclass(slots=True)
