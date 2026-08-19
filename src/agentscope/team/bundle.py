@@ -36,13 +36,17 @@ def _stable_key(*parts: object) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _session_where(filters: AnalyticsFilter) -> tuple[str, list[object]]:
+def _session_where(
+    filters: AnalyticsFilter,
+    *,
+    include_dates: bool = True,
+) -> tuple[str, list[object]]:
     clauses: list[str] = []
     params: list[object] = []
-    if filters.from_date is not None:
+    if include_dates and filters.from_date is not None:
         clauses.append("substr(s.started_at, 1, 10) >= ?")
         params.append(filters.from_date.isoformat())
-    if filters.to_date is not None:
+    if include_dates and filters.to_date is not None:
         clauses.append("substr(s.started_at, 1, 10) <= ?")
         params.append(filters.to_date.isoformat())
     if filters.project is not None:
@@ -63,8 +67,41 @@ def _session_where(filters: AnalyticsFilter) -> tuple[str, list[object]]:
     return (" WHERE " + " AND ".join(clauses) if clauses else "", params)
 
 
-def _query_sessions(repository: Repository, filters: AnalyticsFilter) -> list[dict[str, Any]]:
-    where, params = _session_where(filters)
+def _event_date_clause(
+    filters: AnalyticsFilter,
+    expression: str,
+) -> tuple[str, list[object]]:
+    clauses: list[str] = []
+    params: list[object] = []
+    if filters.from_date is not None:
+        clauses.append(f"substr({expression}, 1, 10) >= ?")
+        params.append(filters.from_date.isoformat())
+    if filters.to_date is not None:
+        clauses.append(f"substr({expression}, 1, 10) <= ?")
+        params.append(filters.to_date.isoformat())
+    return (" AND " + " AND ".join(clauses) if clauses else "", params)
+
+
+def _timestamp_in_filter(value: str | None, filters: AnalyticsFilter) -> bool:
+    if filters.from_date is None and filters.to_date is None:
+        return True
+    if not value:
+        return False
+    day = value[:10]
+    if filters.from_date is not None and day < filters.from_date.isoformat():
+        return False
+    if filters.to_date is not None and day > filters.to_date.isoformat():
+        return False
+    return True
+
+
+def _query_sessions(
+    repository: Repository,
+    filters: AnalyticsFilter,
+    *,
+    include_dates: bool = True,
+) -> list[dict[str, Any]]:
+    where, params = _session_where(filters, include_dates=include_dates)
     with repository.database.connect() as conn:
         rows = conn.execute(
             """
@@ -92,18 +129,34 @@ def _selected_placeholders(session_ids: list[int]) -> str:
     return ",".join("?" for _ in session_ids)
 
 
-def _event_key(kind: str, session_key: str | None, scope_key: str, local_key: str) -> str:
+def _event_key(
+    kind: str,
+    session_key: str | None,
+    scope_key: str,
+    local_key: str,
+) -> str:
     return _stable_key(kind, session_key or scope_key, local_key)
 
 
-def _build_records(repository: Repository, filters: AnalyticsFilter) -> dict[str, list[dict[str, Any]]]:
-    session_rows = _query_sessions(repository, filters)
+def _build_records(
+    repository: Repository,
+    filters: AnalyticsFilter,
+) -> dict[str, list[dict[str, Any]]]:
+    # Dimension filters select candidate sessions. Date filtering is applied
+    # per event below so long-running sessions can contribute only the events
+    # that actually fall inside the requested period.
+    session_rows = _query_sessions(repository, filters, include_dates=False)
     session_ids = [int(row["id"]) for row in session_rows]
 
     users_by_key: dict[str, dict[str, Any]] = {}
     machines_by_key: dict[str, dict[str, Any]] = {}
     sessions: list[dict[str, Any]] = []
     session_keys: dict[int, str] = {}
+    included_session_ids: set[int] = {
+        int(row["id"])
+        for row in session_rows
+        if _timestamp_in_filter(row["started_at"], filters)
+    }
 
     for row in session_rows:
         if row["user_key"]:
@@ -151,9 +204,9 @@ def _build_records(repository: Repository, filters: AnalyticsFilter) -> dict[str
         *sorted(machines_by_key),
     )
     records: dict[str, list[dict[str, Any]]] = {
-        "users": [users_by_key[key] for key in sorted(users_by_key)],
-        "machines": [machines_by_key[key] for key in sorted(machines_by_key)],
-        "sessions": sessions,
+        "users": [],
+        "machines": [],
+        "sessions": [],
         "token_usage": [],
         "costs": [],
         "tool_calls": [],
@@ -165,18 +218,21 @@ def _build_records(repository: Repository, filters: AnalyticsFilter) -> dict[str
 
     placeholders = _selected_placeholders(session_ids)
     with repository.database.connect() as conn:
+        token_date, token_date_params = _event_date_clause(filters, "tu.timestamp")
         token_rows = conn.execute(
             f"""
             SELECT tu.*, m.name AS model
             FROM token_usage tu
             LEFT JOIN models m ON m.id=tu.model_id
-            WHERE tu.session_id IN ({placeholders})
+            WHERE tu.session_id IN ({placeholders}){token_date}
             ORDER BY tu.timestamp, tu.id
             """,
-            session_ids,
+            [*session_ids, *token_date_params],
         ).fetchall()
         for row in token_rows:
-            session_key = session_keys[int(row["session_id"])]
+            session_id = int(row["session_id"])
+            included_session_ids.add(session_id)
+            session_key = session_keys[session_id]
             records["token_usage"].append(
                 {
                     "event_key": _event_key(
@@ -195,18 +251,24 @@ def _build_records(repository: Repository, filters: AnalyticsFilter) -> dict[str
                 }
             )
 
+        cost_date, cost_date_params = _event_date_clause(
+            filters,
+            "COALESCE(c.period_start, c.period_end)",
+        )
         cost_rows = conn.execute(
             f"""
             SELECT c.*, m.name AS model
             FROM costs c
             LEFT JOIN models m ON m.id=c.model_id
-            WHERE c.session_id IN ({placeholders})
+            WHERE c.session_id IN ({placeholders}){cost_date}
             ORDER BY c.period_start, c.id
             """,
-            session_ids,
+            [*session_ids, *cost_date_params],
         ).fetchall()
         for row in cost_rows:
-            session_key = session_keys[int(row["session_id"])]
+            session_id = int(row["session_id"])
+            included_session_ids.add(session_id)
+            session_key = session_keys[session_id]
             records["costs"].append(
                 {
                     "event_key": _event_key(
@@ -229,18 +291,21 @@ def _build_records(repository: Repository, filters: AnalyticsFilter) -> dict[str
                 }
             )
 
+        tool_date, tool_date_params = _event_date_clause(filters, "tc.timestamp")
         tool_rows = conn.execute(
             f"""
             SELECT tc.*, t.name AS tool, t.provider, t.category
             FROM tool_calls tc
             JOIN tools t ON t.id=tc.tool_id
-            WHERE tc.session_id IN ({placeholders})
+            WHERE tc.session_id IN ({placeholders}){tool_date}
             ORDER BY tc.timestamp, tc.id
             """,
-            session_ids,
+            [*session_ids, *tool_date_params],
         ).fetchall()
         for row in tool_rows:
-            session_key = session_keys[int(row["session_id"])]
+            session_id = int(row["session_id"])
+            included_session_ids.add(session_id)
+            session_key = session_keys[session_id]
             records["tool_calls"].append(
                 {
                     "event_key": _event_key(
@@ -259,6 +324,11 @@ def _build_records(repository: Repository, filters: AnalyticsFilter) -> dict[str
                 }
             )
 
+        agent_date, agent_date_params = _event_date_clause(
+            filters,
+            "COALESCE(sa.started_at, sa.ended_at, "
+            "(SELECT sx.started_at FROM sessions sx WHERE sx.id=sa.session_id))",
+        )
         agent_rows = conn.execute(
             f"""
             SELECT sa.*, a.name AS agent, a.type AS agent_type,
@@ -266,13 +336,15 @@ def _build_records(repository: Repository, filters: AnalyticsFilter) -> dict[str
             FROM session_agents sa
             JOIN agents a ON a.id=sa.agent_id
             LEFT JOIN agents pa ON pa.id=sa.parent_agent_id
-            WHERE sa.session_id IN ({placeholders})
+            WHERE sa.session_id IN ({placeholders}){agent_date}
             ORDER BY sa.session_id, a.name, sa.id
             """,
-            session_ids,
+            [*session_ids, *agent_date_params],
         ).fetchall()
         for row in agent_rows:
-            session_key = session_keys[int(row["session_id"])]
+            session_id = int(row["session_id"])
+            included_session_ids.add(session_id)
+            session_key = session_keys[session_id]
             records["agents"].append(
                 {
                     "event_key": _stable_key(
@@ -293,6 +365,10 @@ def _build_records(repository: Repository, filters: AnalyticsFilter) -> dict[str
                 }
             )
 
+        optimization_date, optimization_date_params = _event_date_clause(
+            filters,
+            "op.timestamp",
+        )
         optimization_rows = conn.execute(
             f"""
             SELECT op.*, o.name AS optimizer, o.version AS optimizer_version,
@@ -300,13 +376,15 @@ def _build_records(repository: Repository, filters: AnalyticsFilter) -> dict[str
             FROM optimizations op
             JOIN optimizers o ON o.id=op.optimizer_id
             LEFT JOIN models m ON m.id=op.model_id
-            WHERE op.session_id IN ({placeholders})
+            WHERE op.session_id IN ({placeholders}){optimization_date}
             ORDER BY op.timestamp, op.id
             """,
-            session_ids,
+            [*session_ids, *optimization_date_params],
         ).fetchall()
         for row in optimization_rows:
-            session_key = session_keys[int(row["session_id"])]
+            session_id = int(row["session_id"])
+            included_session_ids.add(session_id)
+            session_key = session_keys[session_id]
             records["optimizations"].append(
                 {
                     "event_key": _event_key(
@@ -329,6 +407,30 @@ def _build_records(repository: Repository, filters: AnalyticsFilter) -> dict[str
                 }
             )
 
+    included_session_keys = {
+        session_keys[session_id]
+        for session_id in included_session_ids
+        if session_id in session_keys
+    }
+    records["sessions"] = [
+        row for row in sessions if row["session_key"] in included_session_keys
+    ]
+    used_user_keys = {
+        str(row["user_key"])
+        for row in records["sessions"]
+        if row["user_key"]
+    }
+    used_machine_keys = {
+        str(row["machine_key"])
+        for row in records["sessions"]
+        if row["machine_key"]
+    }
+    records["users"] = [
+        users_by_key[key] for key in sorted(used_user_keys)
+    ]
+    records["machines"] = [
+        machines_by_key[key] for key in sorted(used_machine_keys)
+    ]
     return records
 
 
