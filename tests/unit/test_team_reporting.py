@@ -1,6 +1,7 @@
 from datetime import date
 
 from agentscope.analytics.budget import calculate_budget_status
+from agentscope.analytics.filters import AnalyticsFilter
 from agentscope.analytics.team_service import TeamAnalyticsService
 from agentscope.reporting.team_html_report import generate_team_html_report
 from agentscope.storage.database import Database
@@ -141,3 +142,28 @@ def test_team_report_exposes_data_quality_without_inventing_provider_diagnostics
     assert "Cobertura observada por fonte" in html
     assert "codex" in html
     assert "Não transportado pelo Team Bundle v1" in html
+
+
+def test_team_report_shows_period_and_active_filters(tmp_path):
+    repo = team_repo(tmp_path)
+    analytics = TeamAnalyticsService(
+        repo,
+        AnalyticsFilter(
+            from_date=date(2026, 8, 18),
+            to_date=date(2026, 8, 18),
+            project="Projeto A",
+            source="codex",
+            user="Dev A",
+            machine="Notebook A",
+        ),
+    )
+    output = tmp_path / "team-filter-context.html"
+
+    generate_team_html_report(repo, analytics, output)
+
+    html = output.read_text(encoding="utf-8")
+    assert "Período: 18/08/2026 a 18/08/2026" in html
+    assert "Projeto: Projeto A" in html
+    assert "Fonte: codex" in html
+    assert "Usuário: Dev A" in html
+    assert "Máquina: Notebook A" in html
