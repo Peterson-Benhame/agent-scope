@@ -1,6 +1,8 @@
 import shutil
+from datetime import date
 from pathlib import Path
 
+from agentscope.analytics.filters import AnalyticsFilter
 from agentscope.analytics.service import AnalyticsService
 from agentscope.importer import collect_sources
 from agentscope.storage.database import Database
@@ -78,6 +80,63 @@ def test_unknown_cost_remains_null(tmp_path):
     summary = analytics.summary()
     assert summary.observed_cost_usd is None
     assert summary.estimated_raw_cost_usd is None
+
+
+def test_summary_filters_by_date_project_model_and_source(tmp_path):
+    _, repo, _ = populated(tmp_path)
+
+    selected = AnalyticsService(
+        repo,
+        AnalyticsFilter(
+            from_date=date(2026, 8, 18),
+            to_date=date(2026, 8, 18),
+            project="demo",
+            model="gpt-5.6-terra",
+            source="codex",
+        ),
+    ).summary()
+
+    assert selected.sessions == 1
+    assert selected.input_tokens == 18019
+    assert selected.output_tokens == 223
+
+    excluded = AnalyticsService(
+        repo,
+        AnalyticsFilter(
+            from_date=date(2026, 8, 19),
+            to_date=date(2026, 8, 19),
+            project="demo",
+            model="gpt-5.6-terra",
+            source="codex",
+        ),
+    ).summary()
+
+    assert excluded.sessions == 0
+    assert excluded.input_tokens == 0
+    assert excluded.total_tokens == 0
+
+
+def test_dimension_filters_exclude_non_matching_data(tmp_path):
+    _, repo, _ = populated(tmp_path)
+
+    assert AnalyticsService(repo, AnalyticsFilter(project="missing")).summary().input_tokens == 0
+    assert AnalyticsService(repo, AnalyticsFilter(model="missing-model")).summary().input_tokens == 0
+    assert AnalyticsService(repo, AnalyticsFilter(source="missing-source")).summary().input_tokens == 0
+
+
+def test_grouped_analytics_respect_active_filters(tmp_path):
+    _, repo, _ = populated(tmp_path)
+
+    matching = AnalyticsService(repo, AnalyticsFilter(project="demo"))
+    assert matching.by_project()[0]["project"] == "demo"
+    assert matching.by_model()[0]["model"] == "gpt-5.6-terra"
+
+    missing = AnalyticsService(repo, AnalyticsFilter(project="missing"))
+    assert missing.by_project() == []
+    assert missing.by_model() == []
+    assert missing.by_agent() == []
+    assert missing.by_skill() == []
+    assert missing.by_tool() == []
 
 
 def test_headroom_lifetime_cost_snapshot_is_replaced_not_accumulated(tmp_path):
