@@ -1,0 +1,1 @@
+{"type":"StatusUpdate","payload":{"context_tokens":7426,"max_context_tokens":262144,"token_usage":{"input_other":2306,"output":420,"input_cache_read":5120,"input_cache_creation":0}}}
