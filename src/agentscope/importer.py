@@ -9,6 +9,7 @@ from agentscope.sources.base import (
     CollectRequest,
     DiscoveryContext,
     SourceCollectionSummary,
+    SourceDiscovery,
 )
 from agentscope.sources.codex import CodexAdapter
 from agentscope.sources.headroom import HeadroomAdapter
@@ -36,8 +37,30 @@ def _emit(progress: ProgressCallback | None, event: ProgressEvent) -> None:
         progress(event)
 
 
-def _default_registry() -> SourceRegistry:
+def default_source_registry() -> SourceRegistry:
     return SourceRegistry([CodexAdapter(), HeadroomAdapter()])
+
+
+def discovery_context(config: AgentScopeConfig) -> DiscoveryContext:
+    return DiscoveryContext(
+        user_home=config.codex_home.parent,
+        overrides={
+            "codex": config.codex_home,
+            "headroom": config.headroom_home,
+        },
+    )
+
+
+def discover_registered_sources(
+    config: AgentScopeConfig,
+    *,
+    registry: SourceRegistry | None = None,
+) -> list[SourceDiscovery]:
+    active_registry = registry or default_source_registry()
+    return active_registry.discover(
+        discovery_context(config),
+        enabled_sources=config.enabled_sources,
+    )
 
 
 def collect_registered_sources(
@@ -48,21 +71,10 @@ def collect_registered_sources(
     full_rescan: bool = False,
     progress: ProgressCallback | None = None,
 ) -> ImportSummary:
-    active_registry = registry or _default_registry()
-    overrides = {
-        "codex": config.codex_home,
-        "headroom": config.headroom_home,
-    }
-    context = DiscoveryContext(
-        user_home=config.codex_home.parent,
-        overrides=overrides,
-    )
+    active_registry = registry or default_source_registry()
 
     _emit(progress, ProgressEvent(stage="discovering", current=0, total=0))
-    discoveries = active_registry.discover(
-        context,
-        enabled_sources=config.enabled_sources,
-    )
+    discoveries = discover_registered_sources(config, registry=active_registry)
     detected = [item for item in discoveries if item.detected]
     total_files = sum(len(item.artifacts) for item in detected)
     processed_files = 0
