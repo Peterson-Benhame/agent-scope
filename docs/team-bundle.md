@@ -50,13 +50,15 @@ The export supports the shared analytics filters:
 
 Dates are inclusive and use `YYYY-MM-DD`. Custom `--from`/`--to` values override `--period`.
 
+Date filtering is applied to event timestamps, not only to the session start time. A long-running session may therefore be included when it contains an event inside the selected period, while events outside that period remain excluded. Cost records without `period_start`/`period_end` use the session start time only for filtering; the original cost fields remain `NULL` in the bundle.
+
 ## Import
 
 ```powershell
 agentscope team import .\team-bundle.json --database .\data\team.db
 ```
 
-Import validates schema, version, required record groups, stable identifiers, numeric metric types, forbidden fields and the canonical `bundle_id` before writing data.
+Import validates schema, version, required record groups, stable identifiers, numeric metric types, forbidden fields, the exact v1 allow-list and the canonical `bundle_id` before writing data.
 
 The import is transactional. A validation or write failure does not leave a partial bundle applied.
 
@@ -77,6 +79,18 @@ The bundle is produced from explicit allow lists. Depending on what the source a
 - optimizer, compression, cache-savings and correlation-confidence metrics.
 
 A metric that is not supplied by a source remains unavailable/`NULL`; the bundle does not convert missing data into zero.
+
+### Uncorrelated optimizer telemetry
+
+Optimizer events such as Headroom savings may exist without reliable correlation to a specific agent session. AgentScope preserves these events without inventing attribution:
+
+- `session_key` remains `null` in the Team Bundle;
+- the team database imports the optimizer event with `session_id = NULL`;
+- known compression/cache savings can contribute to the team-level total;
+- the event is not attributed to a user, project, source session or machine session;
+- per-user/project/source attribution tables therefore do not receive a fabricated row for that event.
+
+When an attribution-dependent export filter such as `--project`, `--source`, `--user` or `--machine` is active, uncorrelated optimizer events are excluded because AgentScope cannot prove that they belong to the selected dimension. Date and model filters can still be applied when those fields are explicitly available on the optimizer event.
 
 ## Forbidden data
 
@@ -99,7 +113,7 @@ The normalized project name may be exported, but the source path is deliberately
 
 Display names are not identity keys. User and machine records use stable keys generated during local collection.
 
-Session keys are namespaced using source, user, machine and external-session identity. Event keys are then namespaced by event type and session/scope. This prevents two developers with the same local provider session/event identifiers from colliding during team consolidation.
+Session keys are namespaced using source, user, machine and external-session identity. Session-bound event keys are then namespaced by event type and session identity. Uncorrelated optimizer events use a deterministic global optimizer namespace so their identifiers do not change merely because unrelated sessions were added to the local database.
 
 ## Idempotency
 
