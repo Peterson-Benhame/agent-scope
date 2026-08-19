@@ -90,6 +90,23 @@ def test_team_report_contains_required_sections_and_pt_br_formatting(tmp_path):
     assert "Orçamento mensal" not in html
 
 
+def test_team_dimension_table_contains_cost_and_savings_attribution(tmp_path):
+    repo = team_repo(tmp_path)
+    analytics = TeamAnalyticsService(repo)
+    output = tmp_path / "team-financial-dimensions.html"
+
+    generate_team_html_report(repo, analytics, output)
+
+    html = output.read_text(encoding="utf-8")
+    assert "Custo observado" in html
+    assert "Custo estimado" in html
+    assert "Economia estimada" in html
+    assert (
+        "<td>Dev A</td><td>1</td><td>1.250</td><td>750</td>"
+        "<td>US$ 12,35</td><td>US$ 18,50</td><td>US$ 4,20</td>"
+    ) in html
+
+
 def test_team_report_renders_budget_only_when_provided(tmp_path):
     repo = team_repo(tmp_path)
     analytics = TeamAnalyticsService(repo)
