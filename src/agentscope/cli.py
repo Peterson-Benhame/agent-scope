@@ -8,8 +8,10 @@ from typing import Optional
 
 import typer
 
+from agentscope.analytics.budget import calculate_budget_status
 from agentscope.analytics.filters import AnalyticsFilter, resolve_period
 from agentscope.analytics.service import AnalyticsService
+from agentscope.analytics.team_service import TeamAnalyticsService
 from agentscope.config import AgentScopeConfig
 from agentscope.importer import (
     ProgressEvent,
@@ -18,13 +20,14 @@ from agentscope.importer import (
 )
 from agentscope.reporting.export import export_datasets
 from agentscope.reporting.html_report import generate_html_report
+from agentscope.reporting.team_html_report import generate_team_html_report
 from agentscope.storage.database import Database
 from agentscope.storage.repository import Repository
 from agentscope.team.bundle import build_team_bundle
 from agentscope.team.importer import import_team_bundle
 
 app = typer.Typer(help="Local-first observability and analytics for agent execution histories.")
-team_app = typer.Typer(help="Export and import sanitized team telemetry bundles.")
+team_app = typer.Typer(help="Export, import and report sanitized team telemetry.")
 app.add_typer(team_app, name="team")
 
 
@@ -32,17 +35,14 @@ def _render_collect_progress(event: ProgressEvent) -> None:
     if event.stage == "discovering":
         typer.echo("Descobrindo fontes...")
         return
-
     if event.stage == "source_detected":
         source = event.source.capitalize() if event.source else "Desconhecida"
         typer.echo(f"Fonte detectada: {source}")
         return
-
     if event.stage == "source_failed":
         source = event.source.capitalize() if event.source else "Desconhecida"
         typer.echo(f"Falha na fonte: {source}")
         return
-
     if event.stage == "collecting":
         total = event.total
         percent = int((event.current / total) * 100) if total else 0
@@ -60,7 +60,6 @@ def _render_collect_progress(event: ProgressEvent) -> None:
             nl=bool(total and event.current >= total),
         )
         return
-
     if event.stage == "complete":
         if event.total == 0:
             typer.echo(f"Coletando [{'█' * 30}] 100% 0/0")
@@ -103,7 +102,6 @@ def _analytics_filter(
         raise typer.BadParameter(
             f"Período inválido: {period}. Use today, 7d, 30d ou month."
         ) from exc
-
     return AnalyticsFilter(
         from_date=resolved.from_date,
         to_date=resolved.to_date,
@@ -161,7 +159,6 @@ def status(
         sessions = conn.execute("SELECT COUNT(*) AS n FROM sessions").fetchone()["n"]
         errors = conn.execute("SELECT COUNT(*) AS n FROM import_errors").fetchone()["n"]
         imports = conn.execute("SELECT COUNT(*) AS n FROM import_state").fetchone()["n"]
-
     discoveries = discover_registered_sources(config)
     typer.echo(
         f"database={config.database_path} sessions={sessions} imports={imports} errors={errors}"
@@ -192,14 +189,8 @@ def analyze(
     config = AgentScopeConfig.from_env(database_path=database)
     repo = _repository(config.database_path)
     filters = _analytics_filter(
-        period=period,
-        from_value=from_value,
-        to_value=to_value,
-        project=project,
-        model=model,
-        source=source,
-        user=user,
-        machine=machine,
+        period=period, from_value=from_value, to_value=to_value,
+        project=project, model=model, source=source, user=user, machine=machine,
     )
     summary = AnalyticsService(repo, filters).summary()
     typer.echo(json.dumps(asdict(summary), ensure_ascii=False, indent=2))
@@ -209,11 +200,7 @@ def analyze(
 def export_command(
     database: Optional[Path] = typer.Option(None, "--database"),
     output_dir: Optional[Path] = typer.Option(None, "--output-dir"),
-    full_content: bool = typer.Option(
-        False,
-        "--full-content",
-        help="Explicitly include full message content.",
-    ),
+    full_content: bool = typer.Option(False, "--full-content", help="Explicitly include full message content."),
     from_value: Optional[str] = typer.Option(None, "--from"),
     to_value: Optional[str] = typer.Option(None, "--to"),
     period: Optional[str] = typer.Option(None, "--period"),
@@ -223,28 +210,16 @@ def export_command(
     user: Optional[str] = typer.Option(None, "--user"),
     machine: Optional[str] = typer.Option(None, "--machine"),
 ) -> None:
-    config = AgentScopeConfig.from_env(
-        database_path=database,
-        reports_path=output_dir,
-    )
+    config = AgentScopeConfig.from_env(database_path=database, reports_path=output_dir)
     repo = _repository(config.database_path)
     filters = _analytics_filter(
-        period=period,
-        from_value=from_value,
-        to_value=to_value,
-        project=project,
-        model=model,
-        source=source,
-        user=user,
-        machine=machine,
+        period=period, from_value=from_value, to_value=to_value,
+        project=project, model=model, source=source, user=user, machine=machine,
     )
     analytics = AnalyticsService(repo, filters)
     created = export_datasets(
-        repo,
-        analytics,
-        config.reports_path,
-        filters=filters,
-        include_content=full_content,
+        repo, analytics, config.reports_path,
+        filters=filters, include_content=full_content,
     )
     typer.echo(f"created={len(created)} output={config.reports_path}")
 
@@ -265,14 +240,8 @@ def report(
     config = AgentScopeConfig.from_env(database_path=database)
     repo = _repository(config.database_path)
     filters = _analytics_filter(
-        period=period,
-        from_value=from_value,
-        to_value=to_value,
-        project=project,
-        model=model,
-        source=source,
-        user=user,
-        machine=machine,
+        period=period, from_value=from_value, to_value=to_value,
+        project=project, model=model, source=source, user=user, machine=machine,
     )
     analytics = AnalyticsService(repo, filters)
     target = output or (config.reports_path / "report.html")
@@ -298,20 +267,11 @@ def team_export(
     config = AgentScopeConfig.from_env(database_path=database)
     repo = _repository(config.database_path)
     filters = _analytics_filter(
-        period=period,
-        from_value=from_value,
-        to_value=to_value,
-        project=project,
-        model=model,
-        source=source,
-        user=user,
-        machine=machine,
+        period=period, from_value=from_value, to_value=to_value,
+        project=project, model=model, source=source, user=user, machine=machine,
     )
     bundle = build_team_bundle(
-        repo,
-        analytics_filter=filters,
-        organization=organization,
-        team=team,
+        repo, analytics_filter=filters, organization=organization, team=team,
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
@@ -334,7 +294,6 @@ def team_import(
     except (OSError, json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
         typer.echo(f"error={exc}", err=True)
         raise typer.Exit(code=1) from exc
-
     typer.echo(
         f"bundle_id={summary.bundle_id} sessions_imported={summary.sessions_imported} "
         f"events_imported={summary.events_imported} events_skipped={summary.events_skipped} "
@@ -342,6 +301,44 @@ def team_import(
     )
     if summary.errors:
         raise typer.Exit(code=1)
+
+
+@team_app.command("report")
+def team_report(
+    database: Optional[Path] = typer.Option(None, "--database"),
+    output: Optional[Path] = typer.Option(None, "--output"),
+    from_value: Optional[str] = typer.Option(None, "--from"),
+    to_value: Optional[str] = typer.Option(None, "--to"),
+    period: Optional[str] = typer.Option(None, "--period"),
+    project: Optional[str] = typer.Option(None, "--project"),
+    model: Optional[str] = typer.Option(None, "--model"),
+    source: Optional[str] = typer.Option(None, "--source"),
+    user: Optional[str] = typer.Option(None, "--user"),
+    machine: Optional[str] = typer.Option(None, "--machine"),
+    monthly_budget_usd: Optional[float] = typer.Option(None, "--monthly-budget-usd"),
+) -> None:
+    try:
+        config = AgentScopeConfig.from_env(
+            database_path=database,
+            monthly_budget_usd=monthly_budget_usd,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--monthly-budget-usd") from exc
+    repo = _repository(config.database_path)
+    filters = _analytics_filter(
+        period=period, from_value=from_value, to_value=to_value,
+        project=project, model=model, source=source, user=user, machine=machine,
+    )
+    analytics = TeamAnalyticsService(repo, filters)
+    summary = analytics.summary()
+    budget = calculate_budget_status(
+        config.monthly_budget_usd,
+        summary.observed_cost_usd,
+        filters.to_date or date.today(),
+    )
+    target = output or (config.reports_path / "team-report.html")
+    generate_team_html_report(repo, analytics, target, budget=budget)
+    typer.echo(f"report={target}")
 
 
 if __name__ == "__main__":
