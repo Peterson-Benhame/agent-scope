@@ -19,6 +19,9 @@ from agentscope.storage.repository import Repository
 _HEADER_LABELS = {
     "project": "Projeto",
     "model": "Modelo",
+    "user": "Usuário",
+    "machine": "Máquina",
+    "identity_confidence": "Confiança da identidade",
     "sessions": "Sessões",
     "input_tokens": "Tokens de entrada",
     "cached_input_tokens": "Tokens de entrada em cache",
@@ -186,6 +189,8 @@ def generate_html_report(
     comparison = analytics.comparison()
     projects = analytics.by_project()
     models = analytics.by_model()
+    users = analytics.by_user()
+    machines = analytics.by_machine()
     agents = analytics.by_agent()
     skills = analytics.by_skill()
     tools = analytics.by_tool()
@@ -289,6 +294,8 @@ code{{background:#eef0f3;padding:2px 5px;border-radius:4px}}
 </section>
 <section class="section"><h2>Modelos</h2>{_table(models)}{_bar_chart('Distribuição por modelo', models, 'model', 'input_tokens')}</section>
 <section class="section"><h2>Projetos</h2>{_table(projects)}{_bar_chart('Distribuição por projeto', projects, 'project', 'input_tokens')}</section>
+<section class="section"><h2>Usuários</h2>{_table(users)}{_bar_chart('Tokens por usuário', users, 'user', 'input_tokens')}</section>
+<section class="section"><h2>Máquinas</h2>{_table(machines)}{_bar_chart('Tokens por máquina', machines, 'machine', 'input_tokens')}</section>
 <section class="section"><h2>Agentes</h2>{_table(agents)}</section>
 <section class="section"><h2>Habilidades</h2>{_table(skills)}</section>
 <section class="section"><h2>Ferramentas / MCPs</h2>{_table(tools)}</section>
