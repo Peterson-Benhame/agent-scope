@@ -47,29 +47,29 @@ class TeamAnalyticsService:
     ) -> tuple[str, list[object]]:
         clauses: list[str] = list(required or [])
         params: list[object] = []
-        f = self.filters
+        filters = self.filters
 
-        if f.from_date is not None:
+        if filters.from_date is not None:
             clauses.append(f"substr({date_expression}, 1, 10) >= ?")
-            params.append(f.from_date.isoformat())
-        if f.to_date is not None:
+            params.append(filters.from_date.isoformat())
+        if filters.to_date is not None:
             clauses.append(f"substr({date_expression}, 1, 10) <= ?")
-            params.append(f.to_date.isoformat())
-        if f.project is not None:
+            params.append(filters.to_date.isoformat())
+        if filters.project is not None:
             clauses.append("p.name = ?")
-            params.append(f.project)
-        if f.model is not None:
+            params.append(filters.project)
+        if filters.model is not None:
             clauses.append(f"{model_expression} = ?")
-            params.append(f.model)
-        if f.source is not None:
+            params.append(filters.model)
+        if filters.source is not None:
             clauses.append("src.name = ?")
-            params.append(f.source)
-        if f.user is not None:
+            params.append(filters.source)
+        if filters.user is not None:
             clauses.append("COALESCE(u.display_name, u.stable_key) = ?")
-            params.append(f.user)
-        if f.machine is not None:
+            params.append(filters.user)
+        if filters.machine is not None:
             clauses.append("COALESCE(mc.display_name, mc.stable_key) = ?")
-            params.append(f.machine)
+            params.append(filters.machine)
 
         return (" WHERE " + " AND ".join(clauses) if clauses else "", params)
 
@@ -88,10 +88,6 @@ class TeamAnalyticsService:
         cost_where, cost_params = self._where(
             date_expression="COALESCE(c.period_start, s.started_at)",
             model_expression="COALESCE(cm.name, sm.name)",
-        )
-        optimization_where, optimization_params = self._where(
-            date_expression="COALESCE(op.timestamp, s.started_at)",
-            model_expression="COALESCE(om.name, sm.name)",
         )
 
         with self.repository.database.connect() as conn:
@@ -129,8 +125,7 @@ class TeamAnalyticsService:
             costs = conn.execute(
                 """
                 SELECT SUM(c.observed_cost_usd) AS observed_cost_usd,
-                       SUM(c.estimated_raw_cost_usd) AS estimated_raw_cost_usd,
-                       SUM(c.total_savings_usd) AS total_savings_usd
+                       SUM(c.estimated_raw_cost_usd) AS estimated_raw_cost_usd
                 FROM costs c
                 LEFT JOIN sessions s ON s.id=c.session_id
                 LEFT JOIN sources src ON src.id=s.source_id
@@ -142,35 +137,13 @@ class TeamAnalyticsService:
                 """ + cost_where,
                 cost_params,
             ).fetchone()
-            optimizer_savings = conn.execute(
-                """
-                SELECT
-                    SUM(
-                        COALESCE(op.compression_savings_usd, 0) +
-                        COALESCE(op.cache_savings_usd, 0)
-                    ) AS savings,
-                    SUM(
-                        CASE
-                            WHEN op.compression_savings_usd IS NOT NULL
-                              OR op.cache_savings_usd IS NOT NULL
-                            THEN 1 ELSE 0
-                        END
-                    ) AS known_rows
-                FROM optimizations op
-                LEFT JOIN sessions s ON s.id=op.session_id
-                LEFT JOIN sources src ON src.id=s.source_id
-                LEFT JOIN projects p ON p.id=s.project_id
-                LEFT JOIN models om ON om.id=op.model_id
-                LEFT JOIN models sm ON sm.id=s.model_id
-                LEFT JOIN users u ON u.id=s.user_id
-                LEFT JOIN machines mc ON mc.id=s.machine_id
-                """ + optimization_where,
-                optimization_params,
-            ).fetchone()
 
-        savings = self._nullable_float(costs, "total_savings_usd")
-        if savings is None and optimizer_savings and int(optimizer_savings["known_rows"] or 0):
-            savings = float(optimizer_savings["savings"] or 0.0)
+        savings_rows = self.savings_by_user()
+        savings = (
+            sum(float(row["total_savings_usd"]) for row in savings_rows)
+            if savings_rows
+            else None
+        )
 
         return TeamAnalyticsSummary(
             users=int(counts["users"] or 0),
@@ -181,7 +154,10 @@ class TeamAnalyticsService:
             output_tokens=int(tokens["output_tokens"] or 0),
             total_tokens=int(tokens["total_tokens"] or 0),
             observed_cost_usd=self._nullable_float(costs, "observed_cost_usd"),
-            estimated_raw_cost_usd=self._nullable_float(costs, "estimated_raw_cost_usd"),
+            estimated_raw_cost_usd=self._nullable_float(
+                costs,
+                "estimated_raw_cost_usd",
+            ),
             total_savings_usd=savings,
         )
 
@@ -213,10 +189,16 @@ class TeamAnalyticsService:
         return [dict(row) for row in rows]
 
     def by_user(self) -> list[dict[str, Any]]:
-        return self._usage_by("COALESCE(u.display_name, u.stable_key, '(unknown)')", "user")
+        return self._usage_by(
+            "COALESCE(u.display_name, u.stable_key, '(unknown)')",
+            "user",
+        )
 
     def by_machine(self) -> list[dict[str, Any]]:
-        return self._usage_by("COALESCE(mc.display_name, mc.stable_key, '(unknown)')", "machine")
+        return self._usage_by(
+            "COALESCE(mc.display_name, mc.stable_key, '(unknown)')",
+            "machine",
+        )
 
     def by_project(self) -> list[dict[str, Any]]:
         return self._usage_by("COALESCE(p.name, '(unknown)')", "project")
@@ -225,7 +207,10 @@ class TeamAnalyticsService:
         return self._usage_by("src.name", "source")
 
     def by_model(self) -> list[dict[str, Any]]:
-        return self._usage_by("COALESCE(tm.name, sm.name, '(unknown)')", "model")
+        return self._usage_by(
+            "COALESCE(tm.name, sm.name, '(unknown)')",
+            "model",
+        )
 
     def by_day(self) -> list[dict[str, Any]]:
         where, params = self._where(date_expression="tu.timestamp")
@@ -258,7 +243,10 @@ class TeamAnalyticsService:
         where, params = self._where(
             date_expression="COALESCE(c.period_start, s.started_at)",
             model_expression="COALESCE(cm.name, sm.name)",
-            required=["(c.observed_cost_usd IS NOT NULL OR c.estimated_raw_cost_usd IS NOT NULL)"],
+            required=[
+                "(c.observed_cost_usd IS NOT NULL "
+                "OR c.estimated_raw_cost_usd IS NOT NULL)"
+            ],
         )
         with self.repository.database.connect() as conn:
             rows = conn.execute(
@@ -277,14 +265,18 @@ class TeamAnalyticsService:
                 {where}
                 GROUP BY {expression}
                 ORDER BY COALESCE(SUM(c.observed_cost_usd), 0) +
-                         COALESCE(SUM(c.estimated_raw_cost_usd), 0) DESC, {alias}
+                         COALESCE(SUM(c.estimated_raw_cost_usd), 0) DESC,
+                         {alias}
                 """,
                 params,
             ).fetchall()
         return [dict(row) for row in rows]
 
     def cost_by_user(self) -> list[dict[str, Any]]:
-        return self._cost_by("COALESCE(u.display_name, u.stable_key, '(unknown)')", "user")
+        return self._cost_by(
+            "COALESCE(u.display_name, u.stable_key, '(unknown)')",
+            "user",
+        )
 
     def cost_by_project(self) -> list[dict[str, Any]]:
         return self._cost_by("COALESCE(p.name, '(unknown)')", "project")
@@ -293,7 +285,10 @@ class TeamAnalyticsService:
         return self._cost_by("src.name", "source")
 
     def cost_by_model(self) -> list[dict[str, Any]]:
-        return self._cost_by("COALESCE(cm.name, sm.name, '(unknown)')", "model")
+        return self._cost_by(
+            "COALESCE(cm.name, sm.name, '(unknown)')",
+            "model",
+        )
 
     def _savings_by(self, expression: str, alias: str) -> list[dict[str, Any]]:
         where, params = self._where(
@@ -312,16 +307,22 @@ class TeamAnalyticsService:
                 ),
                 optimizer_savings AS (
                     SELECT session_id,
-                           SUM(COALESCE(compression_savings_usd, 0) +
-                               COALESCE(cache_savings_usd, 0)) AS savings
+                           SUM(
+                               COALESCE(compression_savings_usd, 0) +
+                               COALESCE(cache_savings_usd, 0)
+                           ) AS savings
                     FROM optimizations
                     WHERE compression_savings_usd IS NOT NULL
                        OR cache_savings_usd IS NOT NULL
                     GROUP BY session_id
                 )
                 SELECT {expression} AS {alias},
-                       SUM(CASE WHEN cs.savings IS NOT NULL THEN cs.savings ELSE os.savings END)
-                           AS total_savings_usd
+                       SUM(
+                           CASE
+                               WHEN cs.savings IS NOT NULL THEN cs.savings
+                               ELSE os.savings
+                           END
+                       ) AS total_savings_usd
                 FROM sessions s
                 JOIN sources src ON src.id=s.source_id
                 LEFT JOIN projects p ON p.id=s.project_id
@@ -339,7 +340,10 @@ class TeamAnalyticsService:
         return [dict(row) for row in rows]
 
     def savings_by_user(self) -> list[dict[str, Any]]:
-        return self._savings_by("COALESCE(u.display_name, u.stable_key, '(unknown)')", "user")
+        return self._savings_by(
+            "COALESCE(u.display_name, u.stable_key, '(unknown)')",
+            "user",
+        )
 
     def savings_by_project(self) -> list[dict[str, Any]]:
         return self._savings_by("COALESCE(p.name, '(unknown)')", "project")
@@ -381,10 +385,16 @@ class TeamAnalyticsService:
             model_tokens = conn.execute(
                 """
                 SELECT COALESCE(SUM(tu.total_tokens), 0) AS total_tokens,
-                       COALESCE(SUM(
-                           CASE WHEN tu.model_id IS NULL AND s.model_id IS NULL
-                                THEN tu.total_tokens ELSE 0 END
-                       ), 0) AS unknown_model_tokens
+                       COALESCE(
+                           SUM(
+                               CASE
+                                   WHEN tu.model_id IS NULL
+                                    AND s.model_id IS NULL
+                                   THEN tu.total_tokens ELSE 0
+                               END
+                           ),
+                           0
+                       ) AS unknown_model_tokens
                 FROM token_usage tu
                 JOIN sessions s ON s.id=tu.session_id
                 JOIN sources src ON src.id=s.source_id
@@ -401,22 +411,27 @@ class TeamAnalyticsService:
                 SELECT src.name AS source,
                        COUNT(DISTINCT s.id) AS sessions,
                        CASE WHEN EXISTS(
-                           SELECT 1 FROM token_usage tx
+                           SELECT 1
+                           FROM token_usage tx
                            JOIN sessions sx ON sx.id=tx.session_id
                            WHERE sx.source_id=src.id
                        ) THEN 1 ELSE 0 END AS has_tokens,
                        CASE WHEN EXISTS(
-                           SELECT 1 FROM token_usage tx
+                           SELECT 1
+                           FROM token_usage tx
                            JOIN sessions sx ON sx.id=tx.session_id
                            WHERE sx.source_id=src.id
                              AND tx.cached_input_tokens IS NOT NULL
                        ) THEN 1 ELSE 0 END AS has_cache,
                        CASE WHEN EXISTS(
-                           SELECT 1 FROM costs cx
+                           SELECT 1
+                           FROM costs cx
                            JOIN sessions sx ON sx.id=cx.session_id
                            WHERE sx.source_id=src.id
-                             AND (cx.observed_cost_usd IS NOT NULL
-                                  OR cx.estimated_raw_cost_usd IS NOT NULL)
+                             AND (
+                                 cx.observed_cost_usd IS NOT NULL
+                                 OR cx.estimated_raw_cost_usd IS NOT NULL
+                             )
                        ) THEN 1 ELSE 0 END AS has_cost
                 FROM sessions s
                 JOIN sources src ON src.id=s.source_id
@@ -431,11 +446,16 @@ class TeamAnalyticsService:
                 session_params,
             ).fetchall()
             import_errors = int(
-                conn.execute("SELECT COUNT(*) AS n FROM import_errors").fetchone()["n"]
+                conn.execute(
+                    "SELECT COUNT(*) AS n FROM import_errors"
+                ).fetchone()["n"]
             )
             confidence_rows = conn.execute(
                 """
-                SELECT COALESCE(op.correlation_confidence, 'unknown') AS confidence,
+                SELECT COALESCE(
+                           op.correlation_confidence,
+                           'unknown'
+                       ) AS confidence,
                        COUNT(*) AS events
                 FROM optimizations op
                 LEFT JOIN sessions s ON s.id=op.session_id
@@ -472,7 +492,9 @@ class TeamAnalyticsService:
                 for row in coverage_rows
             ],
             "import_errors": import_errors,
-            "optimization_confidence": [dict(row) for row in confidence_rows],
+            "optimization_confidence": [
+                dict(row) for row in confidence_rows
+            ],
             "unsupported_provider_diagnostics": None,
             "diagnostics_note": "Não transportado pelo Team Bundle v1",
         }
