@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from agentscope.domain.model_normalization import normalize_model_name
 from agentscope.domain.models import (
     AgentEvidence,
     NormalizedMessage,
@@ -196,7 +197,11 @@ def collect_codex_rollout(path: Path) -> CodexCollectedSession:
             turn_id = payload.get("turn_id")
             if turn_id:
                 current_turn = str(turn_id)
-                current_model = payload.get("model") or current_model
+                explicit_model = payload.get("model")
+                if isinstance(explicit_model, str):
+                    normalized_model = normalize_model_name(explicit_model)
+                    if normalized_model is not None:
+                        current_model = normalized_model
                 session.model = current_model or session.model
                 result.turns.append(
                     NormalizedTurn(
