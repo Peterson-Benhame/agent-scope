@@ -21,6 +21,17 @@ export interface SnapshotSummary {
   estimated_savings_usd: number | null;
 }
 
+export type BillingMode = 'api' | 'chatgpt_codex_plan' | 'unknown' | 'mixed';
+export type BillingConfidence = 'explicit' | 'unknown' | 'mixed';
+export type EstimatedCostBasis = 'openai_api_estimate' | 'openai_api_equivalent';
+
+export interface SnapshotBilling {
+  mode: BillingMode;
+  confidence: BillingConfidence;
+  estimated_cost_basis: EstimatedCostBasis;
+  is_observed_spend: boolean;
+}
+
 export interface SnapshotFreshness {
   last_imported_at: string | null;
   artifacts_tracked: number;
@@ -103,6 +114,7 @@ export interface ExtensionSnapshot {
   freshness?: SnapshotFreshness;
   filters: SnapshotFilters;
   summary: SnapshotSummary;
+  billing: SnapshotBilling;
   availability: SnapshotAvailability;
   series: SnapshotSeries;
   breakdowns: SnapshotBreakdowns;
@@ -159,6 +171,21 @@ function validateAvailabilityItem(value: unknown): void {
   }
   if (value.reason !== null && !reasons.has(String(value.reason))) {
     invalid('Snapshot availability reason is invalid.');
+  }
+}
+
+function validateBilling(value: unknown): void {
+  if (!isRecord(value)) invalid('Snapshot billing section is invalid.');
+  const modes = new Set(['api', 'chatgpt_codex_plan', 'unknown', 'mixed']);
+  const confidences = new Set(['explicit', 'unknown', 'mixed']);
+  const bases = new Set(['openai_api_estimate', 'openai_api_equivalent']);
+  if (
+    !modes.has(String(value.mode)) ||
+    !confidences.has(String(value.confidence)) ||
+    !bases.has(String(value.estimated_cost_basis)) ||
+    typeof value.is_observed_spend !== 'boolean'
+  ) {
+    invalid('Snapshot billing section is invalid.');
   }
 }
 
@@ -222,7 +249,7 @@ export function parseExtensionSnapshot(value: unknown): ExtensionSnapshot {
   if (value.freshness !== undefined) validateFreshness(value.freshness);
   if (
     !isRecord(value.filters) || !isRecord(value.summary) ||
-    !isRecord(value.availability) || !isRecord(value.series) ||
+    !isRecord(value.billing) || !isRecord(value.availability) || !isRecord(value.series) ||
     !isRecord(value.breakdowns) || !isRecord(value.dimensions) ||
     !isRecord(value.quality)
   ) {
@@ -242,6 +269,7 @@ export function parseExtensionSnapshot(value: unknown): ExtensionSnapshot {
     return invalid('Snapshot summary is invalid.');
   }
 
+  validateBilling(value.billing);
   validateAvailabilityItem(value.availability.observed_cost);
   validateAvailabilityItem(value.availability.estimated_cost);
   validateAvailabilityItem(value.availability.estimated_savings);
