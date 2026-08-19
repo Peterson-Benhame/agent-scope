@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable, Protocol
+from typing import Any, Callable, Protocol
 
 
 ProgressCallback = Callable[[Any], None]
@@ -46,6 +46,28 @@ class CollectRequest:
     progress: ProgressCallback | None = None
 
 
+@dataclass(slots=True)
+class SourceCollectionSummary:
+    files_seen: int = 0
+    files_imported: int = 0
+    files_skipped: int = 0
+    sessions_imported: int = 0
+    optimizations_imported: int = 0
+    errors: int = 0
+
+    def __add__(self, other: "SourceCollectionSummary") -> "SourceCollectionSummary":
+        return SourceCollectionSummary(
+            files_seen=self.files_seen + other.files_seen,
+            files_imported=self.files_imported + other.files_imported,
+            files_skipped=self.files_skipped + other.files_skipped,
+            sessions_imported=self.sessions_imported + other.sessions_imported,
+            optimizations_imported=(
+                self.optimizations_imported + other.optimizations_imported
+            ),
+            errors=self.errors + other.errors,
+        )
+
+
 class SourceAdapter(Protocol):
     source_name: str
 
@@ -55,5 +77,5 @@ class SourceAdapter(Protocol):
     def capabilities(self) -> SourceCapabilities:
         ...
 
-    def collect(self, request: CollectRequest) -> Any:
+    def collect(self, request: CollectRequest) -> SourceCollectionSummary:
         ...
