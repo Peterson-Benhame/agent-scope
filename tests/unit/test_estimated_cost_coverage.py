@@ -2,7 +2,6 @@ from datetime import date
 
 from agentscope.analytics.dashboard import DashboardAnalyticsService
 from agentscope.analytics.filters import AnalyticsFilter
-from agentscope.analytics.service import AnalyticsService
 from agentscope.storage.database import Database
 from agentscope.storage.repository import Repository
 
@@ -61,16 +60,20 @@ def _filters():
     )
 
 
-def test_summary_does_not_present_partial_estimate_as_total(tmp_path):
+def test_dashboard_summary_does_not_present_partial_estimate_as_total(tmp_path):
     _, repo = _repo(tmp_path)
+    analytics = DashboardAnalyticsService(repo, _filters())
 
-    summary = AnalyticsService(repo, _filters()).summary()
+    summary = analytics.summary()
+    coverage = analytics.estimated_cost_coverage()
 
     assert summary.estimated_raw_cost_usd is None
-    assert summary.known_estimated_raw_cost_usd == 0.20
-    assert summary.estimated_cost_events_total == 2
-    assert summary.estimated_cost_events_priced == 1
-    assert summary.estimated_cost_complete is False
+    assert coverage == {
+        "events_total": 2,
+        "events_priced": 1,
+        "known_estimated_cost_usd": 0.20,
+        "complete": False,
+    }
 
 
 def test_dashboard_daily_estimate_is_null_when_day_has_partial_coverage(tmp_path):
@@ -81,7 +84,7 @@ def test_dashboard_daily_estimate_is_null_when_day_has_partial_coverage(tmp_path
     assert row["estimated_cost_usd"] is None
 
 
-def test_summary_exposes_total_only_when_every_usage_event_is_priced(tmp_path):
+def test_dashboard_exposes_total_only_when_every_usage_event_is_priced(tmp_path):
     db, repo = _repo(tmp_path)
     with db.connect() as conn:
         second_usage_id = conn.execute(
@@ -98,10 +101,14 @@ def test_summary_exposes_total_only_when_every_usage_event_is_priced(tmp_path):
             (session_id, model_id, f"token_usage_cost:{second_usage_id}"),
         )
 
-    summary = AnalyticsService(repo, _filters()).summary()
+    analytics = DashboardAnalyticsService(repo, _filters())
+    summary = analytics.summary()
+    coverage = analytics.estimated_cost_coverage()
 
-    assert summary.known_estimated_raw_cost_usd == 0.50
+    assert coverage == {
+        "events_total": 2,
+        "events_priced": 2,
+        "known_estimated_cost_usd": 0.50,
+        "complete": True,
+    }
     assert summary.estimated_raw_cost_usd == 0.50
-    assert summary.estimated_cost_events_total == 2
-    assert summary.estimated_cost_events_priced == 2
-    assert summary.estimated_cost_complete is True
