@@ -20,7 +20,8 @@ def test_database_initializes_required_schema(tmp_path):
         "sources", "projects", "models", "sessions", "turns", "messages",
         "agents", "session_agents", "skills", "session_skills", "tools",
         "tool_calls", "token_usage", "optimizers", "optimizations", "costs",
-        "import_state", "import_errors", "schema_migrations", "users", "machines"
+        "import_state", "import_errors", "schema_migrations", "users", "machines",
+        "team_bundles", "team_event_provenance",
     }.issubset(names)
 
 
@@ -91,9 +92,9 @@ def test_v1_database_migrates_additively_and_idempotently(tmp_path):
             "SELECT external_session_id, started_at FROM sessions WHERE id=1"
         ).fetchone()
 
-    assert {"users", "machines"}.issubset(names)
+    assert {"users", "machines", "team_bundles", "team_event_provenance"}.issubset(names)
     assert {"user_id", "machine_id"}.issubset(session_columns)
-    assert versions == [1, 2]
+    assert versions == [1, 2, 3]
     assert legacy[0] == "legacy-session"
     assert legacy[1] == "2026-08-18T10:00:00Z"
 
