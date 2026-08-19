@@ -64,8 +64,39 @@ def test_skill_evidence_distinguishes_available_loaded_and_invoked():
     assert ("tdd", SkillUsageType.AVAILABLE) in evidence
 
 
+def test_skill_detection_rejects_filenames_and_generic_words():
+    data = collect_codex_rollout(FIXTURE)
+    names = {x.name for x in data.skill_evidence}
+
+    assert "superpowers:brainstorming" in names
+    assert "tdd" in names
+    for false_positive in [
+        ".env.local",
+        "App.tsx",
+        "SaldoRepository.cs",
+        "Clareza",
+        "Estrutura",
+    ]:
+        assert false_positive not in names
+
+
+def test_non_model_prose_does_not_replace_explicit_model():
+    data = collect_codex_rollout(FIXTURE)
+
+    assert data.session.model == "gpt-5.6-terra"
+    assert all(turn.model != "revisão automática do codex" for turn in data.turns)
+    assert all(usage.model != "revisão automática do codex" for usage in data.token_usage)
+
+
 def test_agent_evidence_detects_root_and_spawned_agent():
     data = collect_codex_rollout(FIXTURE)
     agents = {(x.name, x.agent_type, x.parent_name) for x in data.agent_evidence}
     assert ("root", "root", None) in agents
     assert ("reviewer", "subagent", "root") in agents
+
+
+def test_agent_like_words_in_ordinary_prose_do_not_create_agents():
+    data = collect_codex_rollout(FIXTURE)
+    names = {x.name for x in data.agent_evidence}
+
+    assert names == {"root", "reviewer"}
