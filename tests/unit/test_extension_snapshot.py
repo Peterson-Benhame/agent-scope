@@ -47,14 +47,17 @@ def make_repo(tmp_path: Path) -> tuple[Repository, Database]:
             """,
             (session_id, model_id),
         )
+        token_usage_id = conn.execute(
+            "SELECT id FROM token_usage WHERE event_key='token-a'"
+        ).fetchone()[0]
         conn.execute(
             """
             INSERT INTO costs(
                 session_id, model_id, period_start, estimated_raw_cost_usd,
                 observed_cost_usd, total_savings_usd, event_key
-            ) VALUES(?, ?, '2026-08-18T10:00:00Z', 0.20, 0.12, 0.03, 'cost-a')
+            ) VALUES(?, ?, '2026-08-18T10:00:00Z', 0.20, 0.12, 0.03, ?)
             """,
-            (session_id, model_id),
+            (session_id, model_id, f"token_usage_cost:{token_usage_id}"),
         )
         conn.execute(
             """
