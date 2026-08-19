@@ -50,15 +50,30 @@ def test_session_identity_association_keeps_user_and_machine_separate(tmp_path):
     session_id = repo.upsert_session(
         NormalizedSession(external_session_id="s1", source="codex")
     )
-    user_id = repo.upsert_user(NormalizedUser(stable_key="user-1"))
-    machine_id = repo.upsert_machine(NormalizedMachine(stable_key="machine-1"))
+    user_id = repo.upsert_user(
+        NormalizedUser(stable_key="user-1", display_name="Developer")
+    )
+    machine_id = repo.upsert_machine(
+        NormalizedMachine(stable_key="machine-1", display_name="Notebook")
+    )
 
     repo.associate_session_identity(session_id, user_id, machine_id)
 
     with db.connect() as conn:
         row = conn.execute(
-            "SELECT user_id, machine_id FROM sessions WHERE id=?", (session_id,)
+            """
+            SELECT s.user_id, s.machine_id,
+                   u.stable_key AS user_key,
+                   m.stable_key AS machine_key
+            FROM sessions s
+            JOIN users u ON u.id=s.user_id
+            JOIN machines m ON m.id=s.machine_id
+            WHERE s.id=?
+            """,
+            (session_id,),
         ).fetchone()
+
     assert row[0] == user_id
     assert row[1] == machine_id
-    assert user_id != machine_id or row[0] is not row[1]
+    assert row["user_key"] == "user-1"
+    assert row["machine_key"] == "machine-1"
