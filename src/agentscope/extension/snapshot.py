@@ -46,6 +46,26 @@ def _dimensions(repository: Repository) -> SnapshotDimensions:
     )
 
 
+def _freshness(repository: Repository) -> dict[str, object]:
+    with repository.database.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT MAX(last_imported_at) AS last_imported_at,
+                   COUNT(*) AS artifacts_tracked
+            FROM import_state
+            WHERE status='complete'
+            """
+        ).fetchone()
+    return {
+        "last_imported_at": (
+            str(row["last_imported_at"])
+            if row["last_imported_at"] is not None
+            else None
+        ),
+        "artifacts_tracked": int(row["artifacts_tracked"] or 0),
+    }
+
+
 def _identity_confidence(repository: Repository) -> dict[str, int]:
     with repository.database.connect() as conn:
         rows = conn.execute(
@@ -98,7 +118,6 @@ def _tokens_without_model(repository: Repository, filters: AnalyticsFilter) -> i
         model_expression="COALESCE(tm.name, sm.name)",
     )
     clauses.insert(0, "COALESCE(tu.model_id, s.model_id) IS NULL")
-
     with repository.database.connect() as conn:
         row = conn.execute(
             """
@@ -129,7 +148,6 @@ def _has_savings_evidence(repository: Repository, filters: AnalyticsFilter) -> b
         "OR c.cache_savings_usd IS NOT NULL "
         "OR c.total_savings_usd IS NOT NULL)",
     )
-
     optimization_clauses, optimization_params = _scope_clauses(
         filters,
         date_expression="op.timestamp",
@@ -139,7 +157,6 @@ def _has_savings_evidence(repository: Repository, filters: AnalyticsFilter) -> b
         0,
         "(op.compression_savings_usd IS NOT NULL OR op.cache_savings_usd IS NOT NULL)",
     )
-
     with repository.database.connect() as conn:
         cost_row = conn.execute(
             """
@@ -157,7 +174,6 @@ def _has_savings_evidence(repository: Repository, filters: AnalyticsFilter) -> b
         ).fetchone()
         if int(cost_row["n"]) > 0:
             return True
-
         optimization_row = conn.execute(
             """
             SELECT COUNT(*) AS n
@@ -205,18 +221,9 @@ def build_extension_snapshot(
         else None
     )
     availability = SnapshotAvailability(
-        observed_cost=_availability(
-            observed_cost,
-            "source_does_not_report_cost",
-        ),
-        estimated_cost=_availability(
-            estimated_cost,
-            "insufficient_pricing_data",
-        ),
-        estimated_savings=_availability(
-            estimated_savings,
-            "no_optimization_data",
-        ),
+        observed_cost=_availability(observed_cost, "source_does_not_report_cost"),
+        estimated_cost=_availability(estimated_cost, "insufficient_pricing_data"),
+        estimated_savings=_availability(estimated_savings, "no_optimization_data"),
     )
 
     return {
@@ -224,6 +231,7 @@ def build_extension_snapshot(
         "version": SNAPSHOT_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "database": str(database_path),
+        "freshness": _freshness(repository),
         "filters": {
             "from": filters.from_date.isoformat() if filters.from_date else None,
             "to": filters.to_date.isoformat() if filters.to_date else None,
@@ -246,9 +254,7 @@ def build_extension_snapshot(
             )
         ),
         "availability": to_dict(availability),
-        "series": {
-            "daily": dashboard.by_day(),
-        },
+        "series": {"daily": dashboard.by_day()},
         "breakdowns": {
             "projects": dashboard.by_project(),
             "models": dashboard.by_model(),
