@@ -27,14 +27,17 @@ from agentscope.storage.database import Database
 from agentscope.storage.repository import Repository
 from agentscope.team.bundle import build_team_bundle
 from agentscope.team.importer import import_team_bundle
+from agentscope.usage_context_backfill import backfill_usage_context
 
 app = typer.Typer(help="Local-first observability and analytics for agent execution histories.")
 team_app = typer.Typer(help="Export, import and report sanitized team telemetry.")
 extension_app = typer.Typer(help="Machine-readable integration commands.")
 identity_app = typer.Typer(help="Identity maintenance commands.")
+usage_context_app = typer.Typer(help="Session product, client and billing context maintenance.")
 app.add_typer(team_app, name="team")
 app.add_typer(extension_app, name="extension")
 app.add_typer(identity_app, name="identity")
+app.add_typer(usage_context_app, name="usage-context")
 
 
 def _render_collect_progress(event: ProgressEvent) -> None:
@@ -176,6 +179,32 @@ def identity_backfill(
         f"sessions_without_machine={summary.sessions_without_machine} "
         f"errors={summary.errors}"
     )
+    if summary.errors:
+        raise typer.Exit(code=1)
+
+
+@usage_context_app.command("backfill")
+def usage_context_backfill(
+    database: Optional[Path] = typer.Option(None, "--database"),
+    source: str = typer.Option("codex", "--source"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    config = AgentScopeConfig.from_env(database_path=database)
+    repo = _repository(config.database_path)
+    summary = backfill_usage_context(repo, sources=frozenset({source}))
+    payload = asdict(summary)
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    else:
+        typer.echo(
+            f"sessions_scanned={summary.sessions_scanned} "
+            f"sessions_updated={summary.sessions_updated} "
+            f"sessions_existing={summary.sessions_existing} errors={summary.errors}"
+        )
+        for client, count in sorted(summary.clients.items()):
+            typer.echo(f"client={client} sessions={count}")
+        for billing_mode, count in sorted(summary.billing_modes.items()):
+            typer.echo(f"billing_mode={billing_mode} sessions={count}")
     if summary.errors:
         raise typer.Exit(code=1)
 
