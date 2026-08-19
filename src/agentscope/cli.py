@@ -20,6 +20,7 @@ from agentscope.importer import (
     collect_registered_sources,
     discover_registered_sources,
 )
+from agentscope.pricing.refresh import refresh_openai_pricing
 from agentscope.reporting.export import export_datasets
 from agentscope.reporting.html_report import generate_html_report
 from agentscope.reporting.team_html_report import generate_team_html_report
@@ -34,10 +35,12 @@ team_app = typer.Typer(help="Export, import and report sanitized team telemetry.
 extension_app = typer.Typer(help="Machine-readable integration commands.")
 identity_app = typer.Typer(help="Identity maintenance commands.")
 usage_context_app = typer.Typer(help="Session product, client and billing context maintenance.")
+pricing_app = typer.Typer(help="Versioned model pricing catalog maintenance.")
 app.add_typer(team_app, name="team")
 app.add_typer(extension_app, name="extension")
 app.add_typer(identity_app, name="identity")
 app.add_typer(usage_context_app, name="usage-context")
+app.add_typer(pricing_app, name="pricing")
 
 
 def _render_collect_progress(event: ProgressEvent) -> None:
@@ -122,6 +125,17 @@ def _analytics_filter(
     )
 
 
+def _render_pricing_refresh(result) -> None:
+    fallback = "last_known_good" if result.used_last_known_good else "none"
+    typer.echo(
+        f"pricing_status={result.status} "
+        f"pricing_records_inserted={result.records_inserted} "
+        f"pricing_fallback={fallback}"
+    )
+    if result.error:
+        typer.echo(f"pricing_error={result.error}")
+
+
 @app.command()
 def collect(
     codex_home: Optional[Path] = typer.Option(None, "--codex-home"),
@@ -148,8 +162,31 @@ def collect(
     )
     for diagnostic in summary.diagnostics:
         typer.echo(f"diagnostic={diagnostic}")
+    pricing = refresh_openai_pricing(repo, force=False)
+    _render_pricing_refresh(pricing)
     if summary.errors:
         raise typer.Exit(code=1)
+
+
+@pricing_app.command("refresh")
+def pricing_refresh(
+    database: Optional[Path] = typer.Option(None, "--database"),
+    force: bool = typer.Option(False, "--force"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    config = AgentScopeConfig.from_env(database_path=database)
+    repo = _repository(config.database_path)
+    result = refresh_openai_pricing(repo, force=force)
+    if json_output:
+        typer.echo(
+            json.dumps(
+                asdict(result),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+        return
+    _render_pricing_refresh(result)
 
 
 @identity_app.command("backfill")
