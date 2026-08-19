@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from agentscope.analytics.filters import AnalyticsFilter
-from agentscope.analytics.service import AnalyticsService
+from agentscope.analytics.service import AnalyticsService, AnalyticsSummary
 from agentscope.storage.repository import Repository
 
 
@@ -26,6 +26,56 @@ class DashboardAnalyticsService(AnalyticsService):
             user_expression="COALESCE(u.display_name, u.stable_key)",
             machine_expression="COALESCE(mc.display_name, mc.stable_key)",
         )
+
+    def _active_session_ids(self) -> set[int]:
+        session_where, session_params = self._where(
+            date_expression="s.started_at",
+            project_expression="p.name",
+            model_expression="sm.name",
+            source_expression="src.name",
+            user_expression="COALESCE(u.display_name, u.stable_key)",
+            machine_expression="COALESCE(mc.display_name, mc.stable_key)",
+            required=["s.started_at IS NOT NULL"],
+        )
+        usage_where, usage_params = self._usage_where("tu.timestamp")
+
+        with self.repository.database.connect() as conn:
+            started_rows = conn.execute(
+                """
+                SELECT DISTINCT s.id AS session_id
+                FROM sessions s
+                LEFT JOIN projects p ON p.id=s.project_id
+                LEFT JOIN models sm ON sm.id=s.model_id
+                JOIN sources src ON src.id=s.source_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
+                """ + session_where,
+                session_params,
+            ).fetchall()
+            usage_rows = conn.execute(
+                """
+                SELECT DISTINCT s.id AS session_id
+                FROM token_usage tu
+                JOIN sessions s ON s.id=tu.session_id
+                LEFT JOIN projects p ON p.id=s.project_id
+                LEFT JOIN models tm ON tm.id=tu.model_id
+                LEFT JOIN models sm ON sm.id=s.model_id
+                JOIN sources src ON src.id=s.source_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
+                """ + usage_where,
+                usage_params,
+            ).fetchall()
+
+        return {
+            int(row["session_id"])
+            for row in [*started_rows, *usage_rows]
+        }
+
+    def summary(self) -> AnalyticsSummary:
+        summary = super().summary()
+        summary.sessions = len(self._active_session_ids())
+        return summary
 
     def by_project(self) -> list[dict[str, Any]]:
         where, params = self._usage_where("tu.timestamp")
@@ -151,21 +201,34 @@ class DashboardAnalyticsService(AnalyticsService):
         )
 
         with self.repository.database.connect() as conn:
-            session_rows = conn.execute(
+            started_session_rows = conn.execute(
                 """
                 SELECT substr(s.started_at, 1, 10) AS day,
-                       COUNT(*) AS sessions
+                       s.id AS session_id
                 FROM sessions s
                 LEFT JOIN projects p ON p.id=s.project_id
                 LEFT JOIN models sm ON sm.id=s.model_id
                 JOIN sources src ON src.id=s.source_id
                 LEFT JOIN users u ON u.id=s.user_id
                 LEFT JOIN machines mc ON mc.id=s.machine_id
-                """ + session_where + """
-                GROUP BY substr(s.started_at, 1, 10)
-                ORDER BY day
-                """,
+                """ + session_where,
                 session_params,
+            ).fetchall()
+
+            usage_session_rows = conn.execute(
+                """
+                SELECT DISTINCT substr(tu.timestamp, 1, 10) AS day,
+                       s.id AS session_id
+                FROM token_usage tu
+                JOIN sessions s ON s.id=tu.session_id
+                LEFT JOIN projects p ON p.id=s.project_id
+                LEFT JOIN models tm ON tm.id=tu.model_id
+                LEFT JOIN models sm ON sm.id=s.model_id
+                JOIN sources src ON src.id=s.source_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
+                """ + usage_where,
+                usage_params,
             ).fetchall()
 
             usage_rows = conn.execute(
@@ -232,7 +295,15 @@ class DashboardAnalyticsService(AnalyticsService):
                 optimization_params,
             ).fetchall()
 
-        sessions = {str(row["day"]): int(row["sessions"]) for row in session_rows}
+        active_sessions_by_day: dict[str, set[int]] = {}
+        for row in [*started_session_rows, *usage_session_rows]:
+            day = str(row["day"])
+            active_sessions_by_day.setdefault(day, set()).add(int(row["session_id"]))
+
+        sessions = {
+            day: len(session_ids)
+            for day, session_ids in active_sessions_by_day.items()
+        }
         usage = {str(row["day"]): dict(row) for row in usage_rows}
         costs = {str(row["day"]): dict(row) for row in cost_rows}
         optimizations = {str(row["day"]): dict(row) for row in optimization_rows}
