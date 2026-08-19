@@ -17,21 +17,38 @@ def _cell(value: object) -> str:
     return escape("" if value is None else str(value))
 
 
-def _usage_table(rows: list[dict], dimension: str, title: str) -> str:
-    body = "".join(
-        "<tr>"
-        f"<td>{_cell(row.get(dimension))}</td>"
-        f"<td>{format_integer(int(row.get('sessions') or 0))}</td>"
-        f"<td>{format_integer(int(row.get('total_tokens') or 0))}</td>"
-        f"<td>{format_integer(int(row.get('cached_input_tokens') or 0))}</td>"
-        "</tr>"
-        for row in rows
-    )
+def _dimension_table(
+    usage_rows: list[dict],
+    cost_rows: list[dict],
+    savings_rows: list[dict],
+    dimension: str,
+    title: str,
+) -> str:
+    costs = {row[dimension]: row for row in cost_rows}
+    savings = {row[dimension]: row for row in savings_rows}
+    body_parts: list[str] = []
+    for row in usage_rows:
+        key = row.get(dimension)
+        cost = costs.get(key, {})
+        saving = savings.get(key, {})
+        body_parts.append(
+            "<tr>"
+            f"<td>{_cell(key)}</td>"
+            f"<td>{format_integer(int(row.get('sessions') or 0))}</td>"
+            f"<td>{format_integer(int(row.get('total_tokens') or 0))}</td>"
+            f"<td>{format_integer(int(row.get('cached_input_tokens') or 0))}</td>"
+            f"<td>{format_usd(cost.get('observed_cost_usd'))}</td>"
+            f"<td>{format_usd(cost.get('estimated_raw_cost_usd'))}</td>"
+            f"<td>{format_usd(saving.get('total_savings_usd'))}</td>"
+            "</tr>"
+        )
+    body = "".join(body_parts)
     if not body:
-        body = '<tr><td colspan="4">Nenhum dado disponível.</td></tr>'
+        body = '<tr><td colspan="7">Nenhum dado disponível.</td></tr>'
     return (
         f"<section><h2>{escape(title)}</h2><table>"
-        "<thead><tr><th>Dimensão</th><th>Sessões</th><th>Tokens</th><th>Cache</th></tr></thead>"
+        "<thead><tr><th>Dimensão</th><th>Sessões</th><th>Tokens</th><th>Cache</th>"
+        "<th>Custo observado</th><th>Custo estimado</th><th>Economia estimada</th></tr></thead>"
         f"<tbody>{body}</tbody></table></section>"
     )
 
@@ -115,6 +132,22 @@ def generate_team_html_report(
     del repository
     summary = analytics.summary()
     quality = analytics.data_quality()
+    user_section = _dimension_table(
+        analytics.by_user(), analytics.cost_by_user(), analytics.savings_by_user(),
+        "user", "Por usuário",
+    )
+    project_section = _dimension_table(
+        analytics.by_project(), analytics.cost_by_project(), analytics.savings_by_project(),
+        "project", "Por projeto",
+    )
+    source_section = _dimension_table(
+        analytics.by_source(), analytics.cost_by_source(), analytics.savings_by_source(),
+        "source", "Por fonte",
+    )
+    model_section = _dimension_table(
+        analytics.by_model(), analytics.cost_by_model(), analytics.savings_by_model(),
+        "model", "Por modelo",
+    )
     html = f"""<!doctype html>
 <html lang="pt-BR">
 <head>
@@ -147,10 +180,10 @@ th, td {{ text-align:left; padding:8px; border-bottom:1px solid #e5e7eb; }}
 <div class="card"><span>Economia</span><strong>{format_usd(summary.total_savings_usd)}</strong></div>
 </div>
 {_budget_section(budget)}
-{_usage_table(analytics.by_user(), 'user', 'Por usuário')}
-{_usage_table(analytics.by_project(), 'project', 'Por projeto')}
-{_usage_table(analytics.by_source(), 'source', 'Por fonte')}
-{_usage_table(analytics.by_model(), 'model', 'Por modelo')}
+{user_section}
+{project_section}
+{source_section}
+{model_section}
 {_daily_table(analytics.by_day())}
 {_quality_section(quality)}
 </body>
