@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 
 
@@ -19,7 +19,7 @@ class AnalyticsFilter:
     source: str | None = None
     user: str | None = None
     machine: str | None = None
-    utc_offset_minutes: int = 0
+    utc_offset_minutes: int = field(default_factory=current_local_utc_offset_minutes)
 
     def local_date_expression(self, expression: str) -> str:
         """Build a SQLite expression that maps a UTC timestamp to the local day."""
