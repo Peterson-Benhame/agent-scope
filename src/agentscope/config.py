@@ -13,6 +13,7 @@ class AgentScopeConfig:
     reports_path: Path
     safe_mode: bool = True
     timezone: str | None = None
+    enabled_sources: frozenset[str] | None = None
 
     @classmethod
     def from_env(
@@ -23,15 +24,48 @@ class AgentScopeConfig:
         headroom_home: Path | None = None,
         database_path: Path | None = None,
         reports_path: Path | None = None,
+        enabled_sources: frozenset[str] | set[str] | None = None,
     ) -> "AgentScopeConfig":
         base = Path(base_dir or Path.cwd())
-        user_home = Path(os.environ.get("USERPROFILE") or os.environ.get("HOME") or Path.home())
-        codex = Path(codex_home or os.environ.get("AGENTSCOPE_CODEX_HOME") or user_home / ".codex")
-        headroom = Path(headroom_home or os.environ.get("AGENTSCOPE_HEADROOM_HOME") or user_home / ".headroom")
-        database = Path(database_path or os.environ.get("AGENTSCOPE_DATABASE") or base / "data" / "agentscope.db")
-        reports = Path(reports_path or os.environ.get("AGENTSCOPE_REPORTS") or base / "reports")
+        user_home = Path(
+            os.environ.get("USERPROFILE")
+            or os.environ.get("HOME")
+            or Path.home()
+        )
+        codex = Path(
+            codex_home
+            or os.environ.get("AGENTSCOPE_CODEX_HOME")
+            or user_home / ".codex"
+        )
+        headroom = Path(
+            headroom_home
+            or os.environ.get("AGENTSCOPE_HEADROOM_HOME")
+            or user_home / ".headroom"
+        )
+        database = Path(
+            database_path
+            or os.environ.get("AGENTSCOPE_DATABASE")
+            or base / "data" / "agentscope.db"
+        )
+        reports = Path(
+            reports_path
+            or os.environ.get("AGENTSCOPE_REPORTS")
+            or base / "reports"
+        )
         safe_value = os.environ.get("AGENTSCOPE_SAFE_MODE", "true").strip().lower()
         safe_mode = safe_value not in {"0", "false", "no", "off"}
+
+        configured_sources = enabled_sources
+        if configured_sources is None:
+            raw_sources = os.environ.get("AGENTSCOPE_SOURCES")
+            if raw_sources is not None:
+                parsed = {
+                    item.strip().lower()
+                    for item in raw_sources.split(",")
+                    if item.strip()
+                }
+                configured_sources = frozenset(parsed) if parsed else None
+
         return cls(
             codex_home=codex,
             headroom_home=headroom,
@@ -39,4 +73,9 @@ class AgentScopeConfig:
             reports_path=reports,
             safe_mode=safe_mode,
             timezone=os.environ.get("AGENTSCOPE_TIMEZONE"),
+            enabled_sources=(
+                frozenset(configured_sources)
+                if configured_sources is not None
+                else None
+            ),
         )
