@@ -82,6 +82,9 @@ def test_v1_database_migrates_additively_and_idempotently(tmp_path):
         session_columns = {
             row[1] for row in migrated.execute("PRAGMA table_info(sessions)")
         }
+        token_columns = {
+            row[1] for row in migrated.execute("PRAGMA table_info(token_usage)")
+        }
         versions = [
             row[0]
             for row in migrated.execute(
@@ -96,7 +99,8 @@ def test_v1_database_migrates_additively_and_idempotently(tmp_path):
         "users", "machines", "team_bundles", "team_event_provenance", "model_pricing"
     }.issubset(names)
     assert {"user_id", "machine_id"}.issubset(session_columns)
-    assert versions == [1, 2, 3, 4]
+    assert "token_source" in token_columns
+    assert versions == [1, 2, 3, 4, 5]
     assert legacy[0] == "legacy-session"
     assert legacy[1] == "2026-08-18T10:00:00Z"
 
