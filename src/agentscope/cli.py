@@ -199,13 +199,26 @@ def pricing_refresh(
 @costs_app.command("calculate")
 def costs_calculate(
     database: Optional[Path] = typer.Option(None, "--database"),
+    period: Optional[str] = typer.Option(None, "--period"),
+    from_value: Optional[str] = typer.Option(None, "--from"),
+    to_value: Optional[str] = typer.Option(None, "--to"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     config = AgentScopeConfig.from_env(database_path=database)
     repo = _repository(config.database_path)
+    from_date = _parse_date(from_value, "--from")
+    to_date = _parse_date(to_value, "--to")
+    try:
+        resolved = resolve_period(period, from_date, to_date, today=date.today())
+    except ValueError as exc:
+        raise typer.BadParameter(
+            f"Período inválido: {period}. Use today, 7d, 30d ou month."
+        ) from exc
     result = calculate_token_usage_costs(
         repo,
         utc_offset_minutes=current_local_utc_offset_minutes(),
+        from_date=resolved.from_date,
+        to_date=resolved.to_date,
     )
     if json_output:
         typer.echo(
