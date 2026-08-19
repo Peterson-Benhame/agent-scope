@@ -262,9 +262,7 @@ def financial_team_repo(tmp_path):
 
 def test_team_summary_counts_people_machines_sessions_and_tokens(tmp_path):
     analytics = TeamAnalyticsService(consolidated_team_repo(tmp_path))
-
     summary = analytics.summary()
-
     assert summary.users == 2
     assert summary.machines == 2
     assert summary.sessions == 2
@@ -279,21 +277,17 @@ def test_team_summary_counts_people_machines_sessions_and_tokens(tmp_path):
 
 def test_team_usage_is_aggregated_by_each_dimension(tmp_path):
     analytics = TeamAnalyticsService(consolidated_team_repo(tmp_path))
-
     assert [(row["user"], row["total_tokens"]) for row in analytics.by_user()] == [
-        ("Dev B", 2300),
-        ("Dev A", 1200),
+        ("Dev B", 2300), ("Dev A", 1200)
     ]
     assert [(row["machine"], row["total_tokens"]) for row in analytics.by_machine()] == [
-        ("Notebook B", 2300),
-        ("Notebook A", 1200),
+        ("Notebook B", 2300), ("Notebook A", 1200)
     ]
     assert {row["project"] for row in analytics.by_project()} == {"Projeto A", "Projeto B"}
     assert {row["source"] for row in analytics.by_source()} == {"codex", "claude_code"}
     assert {row["model"] for row in analytics.by_model()} == {"gpt-a", "claude-b"}
     assert [(row["day"], row["total_tokens"]) for row in analytics.by_day()] == [
-        ("2026-08-17", 1200),
-        ("2026-08-18", 2300),
+        ("2026-08-17", 1200), ("2026-08-18", 2300)
     ]
 
 
@@ -307,9 +301,7 @@ def test_team_summary_obeys_shared_user_and_date_filters(tmp_path):
             user="Dev B",
         ),
     )
-
     summary = analytics.summary()
-
     assert summary.users == 1
     assert summary.machines == 1
     assert summary.sessions == 1
@@ -318,45 +310,54 @@ def test_team_summary_obeys_shared_user_and_date_filters(tmp_path):
 
 def test_team_cost_attribution_keeps_observed_and_estimated_separate(tmp_path):
     analytics = TeamAnalyticsService(financial_team_repo(tmp_path))
-
     by_user = {row["user"]: row for row in analytics.cost_by_user()}
     assert by_user["Dev Cost A"]["observed_cost_usd"] == 4.0
     assert by_user["Dev Cost A"]["estimated_raw_cost_usd"] is None
     assert by_user["Dev Cost B"]["observed_cost_usd"] is None
     assert by_user["Dev Cost B"]["estimated_raw_cost_usd"] == 7.0
     assert "Dev Cost C" not in by_user
-
-    assert {row["project"] for row in analytics.cost_by_project()} == {
-        "Projeto Cost A",
-        "Projeto Cost B",
-    }
-    assert {row["source"] for row in analytics.cost_by_source()} == {
-        "codex",
-        "claude_code",
-    }
-    assert {row["model"] for row in analytics.cost_by_model()} == {
-        "gpt-cost-a",
-        "claude-cost-b",
-    }
+    assert {row["project"] for row in analytics.cost_by_project()} == {"Projeto Cost A", "Projeto Cost B"}
+    assert {row["source"] for row in analytics.cost_by_source()} == {"codex", "claude_code"}
+    assert {row["model"] for row in analytics.cost_by_model()} == {"gpt-cost-a", "claude-cost-b"}
 
 
 def test_team_savings_attribution_combines_cost_and_optimizer_sources(tmp_path):
     analytics = TeamAnalyticsService(financial_team_repo(tmp_path))
-
     by_user = {row["user"]: row for row in analytics.savings_by_user()}
     assert by_user["Dev Cost A"]["total_savings_usd"] == 1.5
     assert by_user["Dev Cost C"]["total_savings_usd"] == 5.0
     assert "Dev Cost B" not in by_user
+    assert {row["project"] for row in analytics.savings_by_project()} == {"Projeto Cost A", "Projeto Cost C"}
+    assert {row["source"] for row in analytics.savings_by_source()} == {"codex", "gemini"}
+    assert {row["model"] for row in analytics.savings_by_model()} == {"gpt-cost-a", "gemini-cost-c"}
 
-    assert {row["project"] for row in analytics.savings_by_project()} == {
-        "Projeto Cost A",
-        "Projeto Cost C",
-    }
-    assert {row["source"] for row in analytics.savings_by_source()} == {
-        "codex",
-        "gemini",
-    }
-    assert {row["model"] for row in analytics.savings_by_model()} == {
-        "gpt-cost-a",
-        "gemini-cost-c",
-    }
+
+def test_team_data_quality_reports_observed_coverage_and_confidence(tmp_path):
+    repo = financial_team_repo(tmp_path)
+    with repo.database.connect() as conn:
+        session_id = conn.execute(
+            "SELECT s.id FROM sessions s JOIN sources src ON src.id=s.source_id WHERE src.name='gemini'"
+        ).fetchone()[0]
+        conn.execute("UPDATE sessions SET model_id=NULL WHERE id=?", (session_id,))
+        conn.execute("UPDATE token_usage SET model_id=NULL WHERE session_id=?", (session_id,))
+        conn.execute(
+            "INSERT INTO import_errors(source, file, error_type, error_message) VALUES('team', 'bundle', 'validation', 'synthetic')"
+        )
+
+    quality = TeamAnalyticsService(repo).data_quality()
+
+    assert quality["identity_confidence"] == [{"confidence": "inferred", "users": 3}]
+    assert quality["unknown_model_tokens"] == 340
+    assert quality["total_tokens"] == 690
+    assert quality["unknown_model_ratio"] == 340 / 690
+    coverage = {row["source"]: row for row in quality["source_coverage"]}
+    assert coverage["codex"]["has_tokens"] is True
+    assert coverage["codex"]["has_cost"] is True
+    assert coverage["claude_code"]["has_tokens"] is True
+    assert coverage["claude_code"]["has_cost"] is True
+    assert coverage["gemini"]["has_tokens"] is True
+    assert coverage["gemini"]["has_cost"] is False
+    assert quality["import_errors"] == 1
+    assert quality["optimization_confidence"] == [{"confidence": "exact", "events": 1}]
+    assert quality["unsupported_provider_diagnostics"] is None
+    assert quality["diagnostics_note"] == "Não transportado pelo Team Bundle v1"
