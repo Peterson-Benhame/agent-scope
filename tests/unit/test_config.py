@@ -1,9 +1,12 @@
+import pytest
+
 from agentscope.config import AgentScopeConfig
 
 
 def test_defaults_use_user_home_and_local_project_paths(monkeypatch, tmp_path):
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "user"))
     monkeypatch.delenv("AGENTSCOPE_SOURCES", raising=False)
+    monkeypatch.delenv("AGENTSCOPE_MONTHLY_BUDGET_USD", raising=False)
 
     config = AgentScopeConfig.from_env(base_dir=tmp_path / "project")
 
@@ -17,6 +20,7 @@ def test_defaults_use_user_home_and_local_project_paths(monkeypatch, tmp_path):
     assert config.reports_path == tmp_path / "project" / "reports"
     assert config.safe_mode is True
     assert config.enabled_sources is None
+    assert config.monthly_budget_usd is None
 
 
 def test_explicit_paths_override_environment(monkeypatch, tmp_path):
@@ -77,3 +81,18 @@ def test_empty_sources_environment_means_all_registered_sources(monkeypatch, tmp
     config = AgentScopeConfig.from_env(base_dir=tmp_path)
 
     assert config.enabled_sources is None
+
+
+def test_monthly_budget_is_parsed_from_environment(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTSCOPE_MONTHLY_BUDGET_USD", "1250.50")
+
+    config = AgentScopeConfig.from_env(base_dir=tmp_path)
+
+    assert config.monthly_budget_usd == 1250.50
+
+
+def test_negative_monthly_budget_is_rejected(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTSCOPE_MONTHLY_BUDGET_USD", "-1")
+
+    with pytest.raises(ValueError, match="monthly budget"):
+        AgentScopeConfig.from_env(base_dir=tmp_path)
