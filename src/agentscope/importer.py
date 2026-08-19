@@ -56,16 +56,22 @@ def default_source_registry() -> SourceRegistry:
 
 
 def discovery_context(config: AgentScopeConfig) -> DiscoveryContext:
+    overrides: dict[str, Path] = {
+        "codex": config.codex_home,
+        "headroom": config.headroom_home,
+    }
+    optional_homes = {
+        "claude_code": config.claude_home,
+        "github_copilot": config.copilot_home,
+        "kimi": config.kimi_home,
+        "gemini": config.gemini_home,
+    }
+    overrides.update(
+        {source: path for source, path in optional_homes.items() if path is not None}
+    )
     return DiscoveryContext(
         user_home=config.codex_home.parent,
-        overrides={
-            "codex": config.codex_home,
-            "headroom": config.headroom_home,
-            "claude_code": config.claude_home,
-            "github_copilot": config.copilot_home,
-            "kimi": config.kimi_home,
-            "gemini": config.gemini_home,
-        },
+        overrides=overrides,
     )
 
 
@@ -97,7 +103,13 @@ def collect_registered_sources(
     detected = [item for item in discoveries if item.detected]
     total_files = sum(len(item.artifacts) for item in detected)
     processed_files = 0
-    summary = ImportSummary()
+    summary = ImportSummary(
+        diagnostics=tuple(
+            discovery.diagnostic
+            for discovery in discoveries
+            if discovery.diagnostic
+        )
+    )
 
     for discovery in discoveries:
         if not discovery.detected:
@@ -158,6 +170,7 @@ def collect_registered_sources(
             )
         except Exception as exc:
             summary.errors += 1
+            summary.diagnostics += (f"{discovery.source}: {exc}",)
             origin = (
                 str(discovery.artifacts[0])
                 if discovery.artifacts
