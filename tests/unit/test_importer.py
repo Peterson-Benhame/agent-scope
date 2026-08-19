@@ -2,6 +2,11 @@ import json
 import shutil
 from pathlib import Path
 
+from agentscope.domain.models import (
+    IdentityConfidence,
+    NormalizedMachine,
+    NormalizedUser,
+)
 from agentscope.importer import ProgressEvent, collect_sources
 from agentscope.storage.database import Database
 from agentscope.storage.repository import Repository
@@ -38,6 +43,45 @@ def test_double_import_is_logically_idempotent(tmp_path):
         assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 3
         assert conn.execute("SELECT COUNT(*) FROM token_usage").fetchone()[0] == 1
+
+
+def test_collection_attaches_resolved_local_identity(monkeypatch, tmp_path):
+    db, repo = make_repo(tmp_path)
+    codex_home, _ = make_codex_home(tmp_path)
+    user = NormalizedUser(
+        stable_key="user-stable",
+        display_name="Developer",
+        provider="local-os",
+        confidence=IdentityConfidence.INFERRED,
+    )
+    machine = NormalizedMachine(
+        stable_key="machine-stable",
+        display_name="Notebook",
+        os="Windows",
+    )
+    monkeypatch.setattr(
+        "agentscope.importer.resolve_local_identity",
+        lambda config: (user, machine),
+    )
+
+    collect_sources(repo, codex_home=codex_home)
+    collect_sources(repo, codex_home=codex_home)
+
+    with db.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT u.stable_key AS user_key, m.stable_key AS machine_key
+            FROM sessions s
+            JOIN users u ON u.id=s.user_id
+            JOIN machines m ON m.id=s.machine_id
+            WHERE s.external_session_id='session-1'
+            """
+        ).fetchone()
+        assert conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM machines").fetchone()[0] == 1
+
+    assert row["user_key"] == "user-stable"
+    assert row["machine_key"] == "machine-stable"
 
 
 def test_append_import_adds_only_new_logical_event(tmp_path):
