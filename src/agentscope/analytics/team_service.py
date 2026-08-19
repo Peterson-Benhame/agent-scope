@@ -43,8 +43,9 @@ class TeamAnalyticsService:
         *,
         date_expression: str,
         model_expression: str = "COALESCE(tm.name, sm.name)",
+        required: list[str] | None = None,
     ) -> tuple[str, list[object]]:
-        clauses: list[str] = []
+        clauses: list[str] = list(required or [])
         params: list[object] = []
         f = self.filters
 
@@ -263,3 +264,113 @@ class TeamAnalyticsService:
                 params,
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def _cost_by(self, expression: str, alias: str) -> list[dict[str, Any]]:
+        where, params = self._where(
+            date_expression="COALESCE(c.period_start, s.started_at)",
+            model_expression="COALESCE(cm.name, sm.name)",
+            required=[
+                "(c.observed_cost_usd IS NOT NULL OR c.estimated_raw_cost_usd IS NOT NULL)"
+            ],
+        )
+        with self.repository.database.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {expression} AS {alias},
+                       SUM(c.observed_cost_usd) AS observed_cost_usd,
+                       SUM(c.estimated_raw_cost_usd) AS estimated_raw_cost_usd
+                FROM costs c
+                JOIN sessions s ON s.id=c.session_id
+                JOIN sources src ON src.id=s.source_id
+                LEFT JOIN projects p ON p.id=s.project_id
+                LEFT JOIN models cm ON cm.id=c.model_id
+                LEFT JOIN models sm ON sm.id=s.model_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
+                {where}
+                GROUP BY {expression}
+                ORDER BY COALESCE(SUM(c.observed_cost_usd), 0) +
+                         COALESCE(SUM(c.estimated_raw_cost_usd), 0) DESC, {alias}
+                """,
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def cost_by_user(self) -> list[dict[str, Any]]:
+        return self._cost_by(
+            "COALESCE(u.display_name, u.stable_key, '(unknown)')", "user"
+        )
+
+    def cost_by_project(self) -> list[dict[str, Any]]:
+        return self._cost_by("COALESCE(p.name, '(unknown)')", "project")
+
+    def cost_by_source(self) -> list[dict[str, Any]]:
+        return self._cost_by("src.name", "source")
+
+    def cost_by_model(self) -> list[dict[str, Any]]:
+        return self._cost_by(
+            "COALESCE(cm.name, sm.name, '(unknown)')", "model"
+        )
+
+    def _savings_by(self, expression: str, alias: str) -> list[dict[str, Any]]:
+        where, params = self._where(
+            date_expression="s.started_at",
+            model_expression="sm.name",
+            required=["(cs.savings IS NOT NULL OR os.savings IS NOT NULL)"],
+        )
+        with self.repository.database.connect() as conn:
+            rows = conn.execute(
+                f"""
+                WITH cost_savings AS (
+                    SELECT session_id, SUM(total_savings_usd) AS savings
+                    FROM costs
+                    WHERE total_savings_usd IS NOT NULL
+                    GROUP BY session_id
+                ),
+                optimizer_savings AS (
+                    SELECT session_id,
+                           SUM(
+                               COALESCE(compression_savings_usd, 0) +
+                               COALESCE(cache_savings_usd, 0)
+                           ) AS savings
+                    FROM optimizations
+                    WHERE compression_savings_usd IS NOT NULL
+                       OR cache_savings_usd IS NOT NULL
+                    GROUP BY session_id
+                )
+                SELECT {expression} AS {alias},
+                       SUM(
+                           CASE
+                               WHEN cs.savings IS NOT NULL THEN cs.savings
+                               ELSE os.savings
+                           END
+                       ) AS total_savings_usd
+                FROM sessions s
+                JOIN sources src ON src.id=s.source_id
+                LEFT JOIN projects p ON p.id=s.project_id
+                LEFT JOIN models sm ON sm.id=s.model_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
+                LEFT JOIN cost_savings cs ON cs.session_id=s.id
+                LEFT JOIN optimizer_savings os ON os.session_id=s.id
+                {where}
+                GROUP BY {expression}
+                ORDER BY total_savings_usd DESC, {alias}
+                """,
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def savings_by_user(self) -> list[dict[str, Any]]:
+        return self._savings_by(
+            "COALESCE(u.display_name, u.stable_key, '(unknown)')", "user"
+        )
+
+    def savings_by_project(self) -> list[dict[str, Any]]:
+        return self._savings_by("COALESCE(p.name, '(unknown)')", "project")
+
+    def savings_by_source(self) -> list[dict[str, Any]]:
+        return self._savings_by("src.name", "source")
+
+    def savings_by_model(self) -> list[dict[str, Any]]:
+        return self._savings_by("COALESCE(sm.name, '(unknown)')", "model")
