@@ -20,6 +20,12 @@ const valid = {
     estimated_cost_usd: 0.20,
     estimated_savings_usd: 0.03,
   },
+  billing: {
+    mode: 'unknown',
+    confidence: 'unknown',
+    estimated_cost_basis: 'openai_api_equivalent',
+    is_observed_spend: false,
+  },
   availability: {
     observed_cost: { available: false, reason: 'source_does_not_report_cost' },
     estimated_cost: { available: true, reason: null },
@@ -82,6 +88,16 @@ describe('parseExtensionSnapshot', () => {
       () => parseExtensionSnapshot({
         ...valid,
         series: { daily: [{ ...valid.series.daily[0], observed_cost_usd: 'unknown' }] },
+      }),
+      (error: unknown) => error instanceof SnapshotContractError && error.code === 'SNAPSHOT_INVALID_JSON',
+    );
+  });
+
+  it('rejects malformed billing semantics', () => {
+    assert.throws(
+      () => parseExtensionSnapshot({
+        ...valid,
+        billing: { ...valid.billing, estimated_cost_basis: 'actual_spend' },
       }),
       (error: unknown) => error instanceof SnapshotContractError && error.code === 'SNAPSHOT_INVALID_JSON',
     );
