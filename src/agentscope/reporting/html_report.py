@@ -142,6 +142,35 @@ def _card(label: str, value: str, delta: str = "") -> str:
     )
 
 
+def _quality_section(quality: dict[str, object]) -> str:
+    confidence = quality.get("optimization_confidence") or {}
+    confidence_rows = [
+        {"correlation_confidence": name, "events": count}
+        for name, count in sorted(dict(confidence).items())
+    ]
+    unknown_share = quality.get("unknown_model_token_share")
+    unknown_share_text = (
+        format_percentage(float(unknown_share))
+        if unknown_share is not None
+        else "Não disponível"
+    )
+    return (
+        '<section class="section"><h2>Qualidade dos dados</h2>'
+        f'<p>Erros de importação: <strong>{format_integer(int(quality["import_errors"]))}</strong></p>'
+        '<h3>Modelos desconhecidos</h3>'
+        '<p>Sessões sem modelo identificado: '
+        f'<strong>{format_integer(int(quality["unknown_model_sessions"]))}</strong></p>'
+        '<p>Participação de tokens sem modelo identificado: '
+        f'<strong>{unknown_share_text}</strong></p>'
+        '<p>Evidências de habilidades: '
+        f'<strong>{format_integer(int(quality["skill_evidence_rows"]))}</strong></p>'
+        '<p>Evidências de agentes: '
+        f'<strong>{format_integer(int(quality["agent_evidence_rows"]))}</strong></p>'
+        '<h3>Confiança de correlação das otimizações</h3>'
+        f'{_table(confidence_rows)}</section>'
+    )
+
+
 def generate_html_report(
     repository: Repository,
     analytics: AnalyticsService,
@@ -166,25 +195,16 @@ def generate_html_report(
     by_day = analytics.by_day()
     savings_day = analytics.savings_by_day()
     cost_day = analytics.cost_by_day()
-
-    with repository.database.connect() as conn:
-        errors = conn.execute("SELECT COUNT(*) AS n FROM import_errors").fetchone()["n"]
-        confidence = [
-            dict(row)
-            for row in conn.execute(
-                """
-                SELECT correlation_confidence, COUNT(*) AS events
-                FROM optimizations
-                GROUP BY correlation_confidence
-                ORDER BY correlation_confidence
-                """
-            ).fetchall()
-        ]
+    quality = analytics.data_quality()
 
     comparison = comparison or {}
     cards = "".join(
         [
-            _card("Sessões", format_integer(summary.sessions), _delta(comparison.get("sessions_pct"))),
+            _card(
+                "Sessões",
+                format_integer(summary.sessions),
+                _delta(comparison.get("sessions_pct")),
+            ),
             _card(
                 "Total de tokens",
                 format_integer(summary.total_tokens),
@@ -274,7 +294,7 @@ code{{background:#eef0f3;padding:2px 5px;border-radius:4px}}
 <section class="section"><h2>Ferramentas / MCPs</h2>{_table(tools)}</section>
 <section class="section"><h2>Otimizadores</h2>{_table(optimizers)}</section>
 <section class="section"><h2>Tendências temporais</h2>{_bar_chart('Tokens por dia', by_day, 'day', 'input_tokens')}{_table(by_day)}</section>
-<section class="section"><h2>Qualidade dos dados</h2><p>Erros de importação: <strong>{format_integer(errors)}</strong></p><h3>Confiança de correlação das otimizações</h3>{_table(confidence)}</section>
+{_quality_section(quality)}
 </body>
 </html>"""
     output.parent.mkdir(parents=True, exist_ok=True)
