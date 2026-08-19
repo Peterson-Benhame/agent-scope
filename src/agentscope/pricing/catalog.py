@@ -8,9 +8,13 @@ from agentscope.storage.repository import Repository
 
 
 OPENAI_API_STANDARD_SCOPE = "openai_api_standard"
-_OPENAI_PRICING_URL = "https://platform.openai.com/pricing"
 _OBSERVED_ON = date(2026, 8, 19)
 _SOURCE_VERSION = "openai-api-standard-observed-2026-08-19"
+_MODEL_PAGE_URLS = {
+    "gpt-5.6-sol": "https://developers.openai.com/api/docs/models/gpt-5.6-sol.md",
+    "gpt-5.6-terra": "https://developers.openai.com/api/docs/models/gpt-5.6-terra.md",
+    "gpt-5.6-luna": "https://developers.openai.com/api/docs/models/gpt-5.6-luna.md",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,21 +197,20 @@ class PricingCatalog:
         )
 
 
-def _source_hash() -> str:
-    raw = f"{_OPENAI_PRICING_URL}|{_SOURCE_VERSION}"
+def _source_hash(model: str) -> str:
+    raw = f"{_MODEL_PAGE_URLS[model]}|{_SOURCE_VERSION}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def install_builtin_openai_catalog(repository: Repository) -> int:
     catalog = PricingCatalog(repository)
-    source_hash = _source_hash()
     rows = (
         ("gpt-5.6-sol", "short", 5.0, 0.50, 6.25, 30.0),
         ("gpt-5.6-sol", "long", 10.0, 1.0, 12.50, 45.0),
-        ("gpt-5.6-terra", "short", 2.50, 0.25, 3.125, 15.0),
-        ("gpt-5.6-terra", "long", 5.0, 0.50, 6.25, 22.50),
-        ("gpt-5.6-luna", "short", 1.0, 0.10, 1.25, 6.0),
-        ("gpt-5.6-luna", "long", 2.0, 0.20, 2.50, 9.0),
+        ("gpt-5.6-terra", "short", 2.0, 0.20, 2.50, 12.0),
+        ("gpt-5.6-terra", "long", 4.0, 0.40, 5.0, 18.0),
+        ("gpt-5.6-luna", "short", 0.20, 0.02, 0.25, 1.20),
+        ("gpt-5.6-luna", "long", 0.40, 0.04, 0.50, 1.80),
     )
     inserted = 0
     for model, context_type, input_price, cached_price, cache_write, output_price in rows:
@@ -224,9 +227,9 @@ def install_builtin_openai_catalog(repository: Repository) -> int:
             valid_from=_OBSERVED_ON,
             valid_to=None,
             valid_from_basis="catalog_observed",
-            source_url=_OPENAI_PRICING_URL,
+            source_url=_MODEL_PAGE_URLS[model],
             source_version=_SOURCE_VERSION,
-            source_hash=source_hash,
+            source_hash=_source_hash(model),
         ):
             inserted += 1
     return inserted
