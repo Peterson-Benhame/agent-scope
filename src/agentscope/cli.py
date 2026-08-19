@@ -13,6 +13,7 @@ from agentscope.analytics.filters import AnalyticsFilter, resolve_period
 from agentscope.analytics.service import AnalyticsService
 from agentscope.analytics.team_service import TeamAnalyticsService
 from agentscope.config import AgentScopeConfig
+from agentscope.extension.snapshot import build_extension_snapshot
 from agentscope.importer import (
     ProgressEvent,
     collect_registered_sources,
@@ -28,7 +29,9 @@ from agentscope.team.importer import import_team_bundle
 
 app = typer.Typer(help="Local-first observability and analytics for agent execution histories.")
 team_app = typer.Typer(help="Export, import and report sanitized team telemetry.")
+extension_app = typer.Typer(help="Machine-readable integration commands.")
 app.add_typer(team_app, name="team")
+app.add_typer(extension_app, name="extension")
 
 
 def _render_collect_progress(event: ProgressEvent) -> None:
@@ -247,6 +250,39 @@ def report(
     target = output or (config.reports_path / "report.html")
     generate_html_report(repo, analytics, target, filters=filters)
     typer.echo(f"report={target}")
+
+
+@extension_app.command("snapshot")
+def extension_snapshot(
+    json_output: bool = typer.Option(False, "--json"),
+    database: Optional[Path] = typer.Option(None, "--database"),
+    from_value: Optional[str] = typer.Option(None, "--from"),
+    to_value: Optional[str] = typer.Option(None, "--to"),
+    period: Optional[str] = typer.Option(None, "--period"),
+    project: Optional[str] = typer.Option(None, "--project"),
+    model: Optional[str] = typer.Option(None, "--model"),
+    source: Optional[str] = typer.Option(None, "--source"),
+    user: Optional[str] = typer.Option(None, "--user"),
+    machine: Optional[str] = typer.Option(None, "--machine"),
+) -> None:
+    if not json_output:
+        raise typer.BadParameter("Use --json for the extension snapshot contract.")
+    config = AgentScopeConfig.from_env(database_path=database)
+    if not config.database_path.exists():
+        typer.echo(f"database not found: {config.database_path}", err=True)
+        raise typer.Exit(code=2)
+    repo = _repository(config.database_path)
+    filters = _analytics_filter(
+        period=period, from_value=from_value, to_value=to_value,
+        project=project, model=model, source=source, user=user, machine=machine,
+    )
+    payload = build_extension_snapshot(
+        repo,
+        filters,
+        period=period,
+        database_path=config.database_path,
+    )
+    typer.echo(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
 
 
 @team_app.command("export")
