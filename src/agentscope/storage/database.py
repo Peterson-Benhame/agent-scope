@@ -365,6 +365,18 @@ class Database:
             ("Add versioned model pricing catalog",),
         )
 
+    def _migrate_v5(self, conn: sqlite3.Connection) -> None:
+        columns = self._columns(conn, "token_usage")
+        if "token_source" not in columns:
+            conn.execute(
+                "ALTER TABLE token_usage ADD COLUMN token_source TEXT NOT NULL "
+                "DEFAULT 'source_reported'"
+            )
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_migrations(version, description) VALUES(5, ?)",
+            ("Add token usage provenance",),
+        )
+
     def initialize(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA_V1)
@@ -375,3 +387,4 @@ class Database:
             self._migrate_v2(conn)
             self._migrate_v3(conn)
             self._migrate_v4(conn)
+            self._migrate_v5(conn)
