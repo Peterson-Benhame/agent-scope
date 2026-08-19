@@ -330,12 +330,24 @@ def team_report(
         project=project, model=model, source=source, user=user, machine=machine,
     )
     analytics = TeamAnalyticsService(repo, filters)
-    summary = analytics.summary()
-    budget = calculate_budget_status(
-        config.monthly_budget_usd,
-        summary.observed_cost_usd,
-        filters.to_date or date.today(),
-    )
+    as_of = filters.to_date or date.today()
+    budget = None
+    if config.monthly_budget_usd is not None:
+        budget_filters = AnalyticsFilter(
+            from_date=as_of.replace(day=1),
+            to_date=as_of,
+            project=filters.project,
+            model=filters.model,
+            source=filters.source,
+            user=filters.user,
+            machine=filters.machine,
+        )
+        budget_spend = TeamAnalyticsService(repo, budget_filters).summary().observed_cost_usd
+        budget = calculate_budget_status(
+            config.monthly_budget_usd,
+            budget_spend,
+            as_of,
+        )
     target = output or (config.reports_path / "team-report.html")
     generate_team_html_report(repo, analytics, target, budget=budget)
     typer.echo(f"report={target}")
