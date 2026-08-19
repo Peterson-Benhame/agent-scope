@@ -5,6 +5,7 @@ import {
   applyFilterPatch,
   applyPeriod,
   createDefaultFilterState,
+  reconcileDimensionFilters,
   resetFilters,
 } from '../../state/filterState';
 
@@ -33,6 +34,39 @@ describe('dashboard filter state', () => {
     assert.strictEqual(state.model, 'gpt-example');
     assert.strictEqual(state.user, 'Dev A');
     assert.strictEqual(state.machine, 'Notebook A');
+
+    const withoutUser = applyFilterPatch(state, { user: null });
+    assert.strictEqual(withoutUser.user, null);
+    assert.strictEqual(withoutUser.machine, 'Notebook A');
+  });
+
+  it('clears stale dimension values while preserving valid ones', () => {
+    const reconciled = reconcileDimensionFilters(
+      {
+        period: '7d',
+        project: 'example-project',
+        model: 'stale-model',
+        source: 'codex',
+        user: 'Old User',
+        machine: 'Notebook A',
+      },
+      {
+        projects: ['example-project'],
+        models: ['gpt-example'],
+        sources: ['codex'],
+        users: ['Dev A'],
+        machines: ['Notebook A'],
+      },
+    );
+
+    assert.deepStrictEqual(reconciled, {
+      period: '7d',
+      project: 'example-project',
+      model: null,
+      source: 'codex',
+      user: null,
+      machine: 'Notebook A',
+    });
   });
 
   it('reset restores only the configured period', () => {
