@@ -122,3 +122,56 @@ def test_invalid_team_bundle_does_not_change_existing_team_data(tmp_path):
     with before_db.connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == before_sessions
         assert conn.execute("SELECT COUNT(*) FROM team_bundles").fetchone()[0] == before_bundles
+
+
+def test_team_report_cli_uses_shared_filters_and_budget(tmp_path):
+    source_db = tmp_path / "source.db"
+    target_db = tmp_path / "team.db"
+    bundle_path = tmp_path / "bundle.json"
+    report_path = tmp_path / "team-report.html"
+    populate_source(source_db)
+
+    assert runner.invoke(
+        app,
+        ["team", "export", "--database", str(source_db), "--output", str(bundle_path)],
+    ).exit_code == 0
+    assert runner.invoke(
+        app,
+        ["team", "import", str(bundle_path), "--database", str(target_db)],
+    ).exit_code == 0
+
+    result = runner.invoke(
+        app,
+        [
+            "team", "report",
+            "--database", str(target_db),
+            "--output", str(report_path),
+            "--from", "2026-08-18",
+            "--to", "2026-08-18",
+            "--user", "Dev A",
+            "--monthly-budget-usd", "100",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert report_path.exists()
+    html = report_path.read_text(encoding="utf-8")
+    assert "Dev A" in html
+    assert "1.200" in html
+    assert "Orçamento mensal" in html
+    assert "US$ 100,00" in html
+    assert "TEAM_CLI_PROMPT_SECRET" not in html
+
+
+def test_team_report_cli_rejects_negative_budget(tmp_path):
+    result = runner.invoke(
+        app,
+        [
+            "team", "report",
+            "--database", str(tmp_path / "empty.db"),
+            "--output", str(tmp_path / "report.html"),
+            "--monthly-budget-usd", "-1",
+        ],
+    )
+
+    assert result.exit_code != 0
