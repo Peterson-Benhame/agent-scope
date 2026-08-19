@@ -1,0 +1,18 @@
+{
+  "schema_version": 5,
+  "lifetime": {
+    "requests": 3,
+    "tokens_saved": 1500,
+    "compression_savings_usd": 0.003,
+    "cache_read_tokens": 12000,
+    "cache_savings_usd": 0.02,
+    "total_input_tokens": 50000,
+    "total_input_cost_usd": 0.08
+  },
+  "history": [
+    {"timestamp":"2026-08-18T21:00:00Z","model":"gpt-5.6-terra","total_tokens_saved":500,"compression_savings_usd":0.001,"cache_read_tokens":4000,"cache_savings_usd":0.006,"total_input_tokens":15000,"total_input_cost_usd":0.025},
+    {"timestamp":"2026-08-18T21:01:00Z","model":"gpt-5.6-terra","total_tokens_saved":1500,"compression_savings_usd":0.003,"cache_read_tokens":12000,"cache_savings_usd":0.02,"total_input_tokens":50000,"total_input_cost_usd":0.08}
+  ],
+  "projects": {"demo":{"requests":3,"tokens_saved":1500,"total_input_tokens":50000}},
+  "by_model": {"gpt-5.6-terra":{"requests":3,"tokens_saved":1500,"total_input_tokens":50000,"total_input_cost_usd":0.08}}
+}
