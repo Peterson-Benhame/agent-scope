@@ -22,6 +22,12 @@ const snapshot: ExtensionSnapshot = {
     estimated_cost_usd: 21.034,
     estimated_savings_usd: 76.891,
   },
+  billing: {
+    mode: 'unknown',
+    confidence: 'unknown',
+    estimated_cost_basis: 'openai_api_equivalent',
+    is_observed_spend: false,
+  },
   availability: {
     observed_cost: { available: true, reason: null },
     estimated_cost: { available: true, reason: null },
@@ -59,7 +65,7 @@ function withBilling(
       estimated_cost_basis: estimatedCostBasis,
       is_observed_spend: false,
     },
-  } as ExtensionSnapshot;
+  };
 }
 
 describe('dashboard view model', () => {
