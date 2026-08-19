@@ -9,7 +9,7 @@ import {
 
 const validSnapshot = JSON.stringify({
   schema: 'agentscope-extension-snapshot',
-  version: 1,
+  version: 2,
   generated_at: '2026-08-19T14:00:00Z',
   database: 'agentscope.db',
   filters: { period: '7d' },
@@ -19,8 +19,16 @@ const validSnapshot = JSON.stringify({
     tokens_saved: 0,
     cache_ratio: null,
     observed_cost_usd: null,
+    estimated_cost_usd: null,
     estimated_savings_usd: null,
   },
+  availability: {
+    observed_cost: { available: false, reason: 'source_does_not_report_cost' },
+    estimated_cost: { available: false, reason: 'insufficient_pricing_data' },
+    estimated_savings: { available: false, reason: 'no_optimization_data' },
+  },
+  series: { daily: [] },
+  breakdowns: { projects: [], models: [], sources: [] },
   dimensions: { projects: [], models: [], sources: [], users: [], machines: [] },
   quality: { import_errors: 0, tokens_without_model: 0, identity_confidence: {}, correlation_confidence: {} },
 });
@@ -43,9 +51,7 @@ class FakeRunner implements ProcessRunner {
     this.executable = executable;
     this.args = args;
     this.timeout = timeoutMs;
-    if (this.thrown) {
-      throw this.thrown;
-    }
+    if (this.thrown) throw this.thrown;
     return this.result;
   }
 }
