@@ -1,0 +1,97 @@
+from datetime import date
+
+from agentscope.analytics.filters import AnalyticsFilter
+from agentscope.analytics.service import AnalyticsService
+from agentscope.storage.database import Database
+from agentscope.storage.repository import Repository
+
+
+def _repo(tmp_path):
+    db = Database(tmp_path / "agentscope.db")
+    db.initialize()
+    repo = Repository(db)
+    with db.connect() as conn:
+        conn.execute("INSERT INTO sources(name, type) VALUES('codex', 'codex')")
+        conn.execute("INSERT INTO projects(name, path) VALUES('demo', '/work/demo')")
+        conn.execute("INSERT INTO models(provider, name) VALUES('openai', 'gpt-5.6-sol')")
+        source_id = conn.execute("SELECT id FROM sources WHERE name='codex'").fetchone()[0]
+        project_id = conn.execute("SELECT id FROM projects WHERE name='demo'").fetchone()[0]
+        model_id = conn.execute("SELECT id FROM models WHERE name='gpt-5.6-sol'").fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO sessions(source_id, external_session_id, project_id, started_at, model_id)
+            VALUES(?, 's1', ?, '2026-08-18T10:00:00Z', ?)
+            """,
+            (source_id, project_id, model_id),
+        )
+        session_id = conn.execute("SELECT id FROM sessions WHERE external_session_id='s1'").fetchone()[0]
+        for idx, hour in ((1, 10), (2, 11)):
+            conn.execute(
+                """
+                INSERT INTO token_usage(
+                    session_id, timestamp, model_id, input_tokens,
+                    cached_input_tokens, output_tokens, total_tokens, event_key
+                ) VALUES(?, ?, ?, 100, 80, 20, 120, ?)
+                """,
+                (session_id, f"2026-08-18T{hour:02d}:05:00Z", model_id, f"token-{idx}"),
+            )
+        first_usage_id = conn.execute(
+            "SELECT id FROM token_usage WHERE event_key='token-1'"
+        ).fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO costs(
+                session_id, model_id, period_start, estimated_raw_cost_usd, event_key
+            ) VALUES(?, ?, '2026-08-18T10:05:00Z', 0.20, ?)
+            """,
+            (session_id, model_id, f"token_usage_cost:{first_usage_id}"),
+        )
+    return db, repo
+
+
+def _filters():
+    return AnalyticsFilter(
+        from_date=date(2026, 8, 18),
+        to_date=date(2026, 8, 18),
+        project="demo",
+        model="gpt-5.6-sol",
+        source="codex",
+    )
+
+
+def test_analyze_summary_keeps_partial_cost_as_known_subtotal_only(tmp_path):
+    _, repo = _repo(tmp_path)
+
+    summary = AnalyticsService(repo, _filters()).summary()
+
+    assert summary.estimated_raw_cost_usd is None
+    assert summary.known_estimated_raw_cost_usd == 0.20
+    assert summary.estimated_cost_events_total == 2
+    assert summary.estimated_cost_events_priced == 1
+    assert summary.estimated_cost_complete is False
+
+
+def test_analyze_summary_exposes_total_when_coverage_is_complete(tmp_path):
+    db, repo = _repo(tmp_path)
+    with db.connect() as conn:
+        second_usage_id = conn.execute(
+            "SELECT id FROM token_usage WHERE event_key='token-2'"
+        ).fetchone()[0]
+        session_id = conn.execute("SELECT id FROM sessions WHERE external_session_id='s1'").fetchone()[0]
+        model_id = conn.execute("SELECT id FROM models WHERE name='gpt-5.6-sol'").fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO costs(
+                session_id, model_id, period_start, estimated_raw_cost_usd, event_key
+            ) VALUES(?, ?, '2026-08-18T11:05:00Z', 0.30, ?)
+            """,
+            (session_id, model_id, f"token_usage_cost:{second_usage_id}"),
+        )
+
+    summary = AnalyticsService(repo, _filters()).summary()
+
+    assert summary.estimated_raw_cost_usd == 0.50
+    assert summary.known_estimated_raw_cost_usd == 0.50
+    assert summary.estimated_cost_events_total == 2
+    assert summary.estimated_cost_events_priced == 2
+    assert summary.estimated_cost_complete is True
