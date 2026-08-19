@@ -44,6 +44,8 @@ def test_cli_collect_status_analyze_export_and_report(tmp_path):
     db, codex_home, headroom_home, collect = collect_fixture_data(tmp_path)
     reports = tmp_path / "reports"
 
+    assert "Fonte detectada: Codex" in collect.output
+    assert "Fonte detectada: Headroom" in collect.output
     assert "Coletando" in collect.output
     assert "100%" in collect.output
     assert "sessions_imported=1" in collect.output
@@ -62,6 +64,8 @@ def test_cli_collect_status_analyze_export_and_report(tmp_path):
     )
     assert status.exit_code == 0
     assert "sessions=1" in status.output
+    assert "source=codex detected=yes artifacts=1" in status.output
+    assert "source=headroom detected=yes artifacts=3" in status.output
 
     analyze = runner.invoke(app, ["analyze", "--database", str(db)])
     assert analyze.exit_code == 0
@@ -86,6 +90,30 @@ def test_cli_collect_status_analyze_export_and_report(tmp_path):
     )
     assert report.exit_code == 0
     assert (reports / "report.html").exists()
+
+
+def test_collect_respects_enabled_sources_environment(monkeypatch, tmp_path):
+    codex_home, headroom_home = arrange_sources(tmp_path)
+    db = tmp_path / "codex-only.db"
+    monkeypatch.setenv("AGENTSCOPE_SOURCES", "codex")
+
+    result = runner.invoke(
+        app,
+        [
+            "collect",
+            "--codex-home",
+            str(codex_home),
+            "--headroom-home",
+            str(headroom_home),
+            "--database",
+            str(db),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Fonte detectada: Codex" in result.output
+    assert "Fonte detectada: Headroom" not in result.output
+    assert "optimizations_imported=0" in result.output
 
 
 def test_report_accepts_inclusive_from_and_to_dates(tmp_path):
