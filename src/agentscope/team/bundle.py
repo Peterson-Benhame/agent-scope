@@ -138,6 +138,73 @@ def _event_key(
     return _stable_key(kind, session_key or scope_key, local_key)
 
 
+def _global_optimization_records(
+    repository: Repository,
+    filters: AnalyticsFilter,
+) -> list[dict[str, Any]]:
+    if any(
+        value is not None
+        for value in (
+            filters.project,
+            filters.source,
+            filters.user,
+            filters.machine,
+        )
+    ):
+        return []
+
+    clauses = ["op.session_id IS NULL"]
+    params: list[object] = []
+    if filters.from_date is not None:
+        clauses.append("substr(op.timestamp, 1, 10) >= ?")
+        params.append(filters.from_date.isoformat())
+    if filters.to_date is not None:
+        clauses.append("substr(op.timestamp, 1, 10) <= ?")
+        params.append(filters.to_date.isoformat())
+    if filters.model is not None:
+        clauses.append("m.name = ?")
+        params.append(filters.model)
+
+    with repository.database.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT op.*, o.name AS optimizer, o.version AS optimizer_version,
+                   m.name AS model
+            FROM optimizations op
+            JOIN optimizers o ON o.id=op.optimizer_id
+            LEFT JOIN models m ON m.id=op.model_id
+            WHERE """ + " AND ".join(clauses) + " ORDER BY op.timestamp, op.id",
+            params,
+        ).fetchall()
+
+    return [
+        {
+            "event_key": _stable_key(
+                "optimization",
+                "global",
+                row["optimizer"],
+                row["optimizer_version"],
+                row["event_key"],
+            ),
+            "session_key": None,
+            "optimizer": row["optimizer"],
+            "optimizer_version": row["optimizer_version"],
+            "timestamp": row["timestamp"],
+            "model": row["model"],
+            "original_tokens": row["original_tokens"],
+            "optimized_tokens": row["optimized_tokens"],
+            "tokens_saved": row["tokens_saved"],
+            "compression_percent": row["compression_percent"],
+            "cache_read_tokens": row["cache_read_tokens"],
+            "compression_savings_usd": row["compression_savings_usd"],
+            "cache_savings_usd": row["cache_savings_usd"],
+            "observed_input_cost_usd": row["observed_input_cost_usd"],
+            "correlation_confidence": row["correlation_confidence"],
+        }
+        for row in rows
+    ]
+
+
 def _build_records(
     repository: Repository,
     filters: AnalyticsFilter,
@@ -211,7 +278,7 @@ def _build_records(
         "costs": [],
         "tool_calls": [],
         "agents": [],
-        "optimizations": [],
+        "optimizations": _global_optimization_records(repository, filters),
     }
     if not session_ids:
         return records
