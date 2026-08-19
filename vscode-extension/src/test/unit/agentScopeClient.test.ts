@@ -36,12 +36,16 @@ class FakeRunner implements ProcessRunner {
       stderr: '',
       exitCode: 0,
     },
+    private readonly thrown?: unknown,
   ) {}
 
   async run(executable: string, args: readonly string[], timeoutMs: number) {
     this.executable = executable;
     this.args = args;
     this.timeout = timeoutMs;
+    if (this.thrown) {
+      throw this.thrown;
+    }
     return this.result;
   }
 }
@@ -66,10 +70,28 @@ describe('AgentScopeClient', () => {
     assert.strictEqual(runner.timeout, 15_000);
   });
 
-  it('omits period when custom dates are present', () => {
+  it('forwards every dimension and omits period for custom dates', () => {
     assert.deepStrictEqual(
-      buildSnapshotArgs({ period: '30d', from: '2026-08-01', to: '2026-08-18' }),
-      ['extension', 'snapshot', '--json', '--from', '2026-08-01', '--to', '2026-08-18'],
+      buildSnapshotArgs({
+        period: '30d',
+        from: '2026-08-01',
+        to: '2026-08-18',
+        project: 'example-project',
+        model: 'gpt-example',
+        source: 'codex',
+        user: 'Dev A',
+        machine: 'Notebook A',
+      }),
+      [
+        'extension', 'snapshot', '--json',
+        '--from', '2026-08-01',
+        '--to', '2026-08-18',
+        '--project', 'example-project',
+        '--model', 'gpt-example',
+        '--source', 'codex',
+        '--user', 'Dev A',
+        '--machine', 'Notebook A',
+      ],
     );
   });
 
@@ -79,6 +101,24 @@ describe('AgentScopeClient', () => {
     await assert.rejects(
       client.snapshot({ period: '7d' }),
       (error: unknown) => error instanceof SnapshotClientError && error.code === 'DATABASE_NOT_FOUND',
+    );
+  });
+
+  it('maps missing executable', async () => {
+    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' });
+    const client = new AgentScopeClient({ runner: new FakeRunner(undefined, missing) });
+    await assert.rejects(
+      client.snapshot({ period: '7d' }),
+      (error: unknown) => error instanceof SnapshotClientError && error.code === 'AGENTSCOPE_NOT_FOUND',
+    );
+  });
+
+  it('maps timeouts', async () => {
+    const timeout = Object.assign(new Error('timeout'), { killed: true });
+    const client = new AgentScopeClient({ runner: new FakeRunner(undefined, timeout) });
+    await assert.rejects(
+      client.snapshot({ period: '7d' }),
+      (error: unknown) => error instanceof SnapshotClientError && error.code === 'SNAPSHOT_TIMEOUT',
     );
   });
 
