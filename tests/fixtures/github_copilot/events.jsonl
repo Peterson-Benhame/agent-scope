@@ -1,0 +1,4 @@
+{"type":"session.start","data":{"sessionId":"copilot-session-1","version":1,"copilotVersion":"1.0.0-test","startTime":"2026-08-18T11:00:00Z","context":{"cwd":"C:\\work\\copilot-demo"}}}
+{"type":"user.message","data":{"timestamp":"2026-08-18T11:00:01Z","content":"COPILOT_PROMPT_SENTINEL"}}
+{"type":"assistant.message","data":{"timestamp":"2026-08-18T11:00:02Z","content":"COPILOT_RESPONSE_SENTINEL","model":"gpt-5.4","toolRequests":[{"toolCallId":"copilot-tool-1","name":"shell","arguments":{"command":"COPILOT_SECRET_COMMAND"}}]}}
+{"type":"session.shutdown","data":{"sessionId":"copilot-session-1","timestamp":"2026-08-18T11:00:03Z","currentModel":"gpt-5.4","modelMetrics":{"gpt-5.4":{"usage":{"inputTokens":2000,"outputTokens":300,"cacheReadTokens":1200,"cacheWriteTokens":100,"reasoningTokens":50},"requests":{"count":1,"cost":1.0}}}}}
