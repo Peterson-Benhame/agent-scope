@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Callable
 
 from agentscope.config import AgentScopeConfig
+from agentscope.identity import resolve_local_identity
 from agentscope.sources.base import (
     CollectRequest,
     DiscoveryContext,
@@ -72,6 +73,7 @@ def collect_registered_sources(
     progress: ProgressCallback | None = None,
 ) -> ImportSummary:
     active_registry = registry or default_source_registry()
+    local_user, local_machine = resolve_local_identity(config)
 
     _emit(progress, ProgressEvent(stage="discovering", current=0, total=0))
     discoveries = discover_registered_sources(config, registry=active_registry)
@@ -111,6 +113,8 @@ def collect_registered_sources(
                     discovery=discovery,
                     full_rescan=full_rescan,
                     progress=progress,
+                    user=local_user,
+                    machine=local_machine,
                 )
             )
             summary = summary + result
