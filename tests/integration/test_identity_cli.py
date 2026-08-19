@@ -149,3 +149,49 @@ def test_identity_backfill_cli_repairs_historical_session(tmp_path):
     payload = json.loads(analyze.output)
     assert payload["sessions"] == 1
     assert payload["total_tokens"] > 0
+
+
+def test_codex_origin_diagnostics_cli_reports_fixture_as_vscode(tmp_path):
+    codex_home = tmp_path / ".codex"
+    session_dir = codex_home / "sessions" / "2026" / "08" / "18"
+    session_dir.mkdir(parents=True)
+    shutil.copy(FIXTURE, session_dir / "rollout.jsonl")
+    db = tmp_path / "agentscope.db"
+    env = {
+        "AGENTSCOPE_SOURCES": "codex",
+        "AGENTSCOPE_USER_NAME": "Dev A",
+        "AGENTSCOPE_MACHINE_NAME": "Notebook A",
+    }
+
+    collected = runner.invoke(
+        app,
+        ["collect", "--codex-home", str(codex_home), "--database", str(db)],
+        env=env,
+    )
+    assert collected.exit_code == 0, collected.output
+
+    result = runner.invoke(
+        app,
+        [
+            "diagnostics",
+            "codex-origin",
+            "--json",
+            "--database",
+            str(db),
+            "--user",
+            "Dev A",
+            "--machine",
+            "Notebook A",
+        ],
+        env=env,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["summary"]["sessions"] == 1
+    assert payload["summary"]["clients"] == [
+        {"client": "vscode", "sessions": 1, "total_tokens": 18242}
+    ]
+    assert payload["sessions"][0]["originator"] == "codex_vscode"
+    assert payload["sessions"][0]["metadata_source"] == "vscode"
+    assert payload["sessions"][0]["client"] == "vscode"
