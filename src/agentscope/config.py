@@ -9,6 +9,10 @@ from pathlib import Path
 class AgentScopeConfig:
     codex_home: Path
     headroom_home: Path
+    claude_home: Path
+    copilot_home: Path
+    kimi_home: Path
+    gemini_home: Path
     database_path: Path
     reports_path: Path
     safe_mode: bool = True
@@ -24,6 +28,10 @@ class AgentScopeConfig:
         base_dir: Path | None = None,
         codex_home: Path | None = None,
         headroom_home: Path | None = None,
+        claude_home: Path | None = None,
+        copilot_home: Path | None = None,
+        kimi_home: Path | None = None,
+        gemini_home: Path | None = None,
         database_path: Path | None = None,
         reports_path: Path | None = None,
         enabled_sources: frozenset[str] | set[str] | None = None,
@@ -45,6 +53,28 @@ class AgentScopeConfig:
             headroom_home
             or os.environ.get("AGENTSCOPE_HEADROOM_HOME")
             or user_home / ".headroom"
+        )
+        claude = Path(
+            claude_home
+            or os.environ.get("AGENTSCOPE_CLAUDE_HOME")
+            or user_home / ".claude"
+        )
+        copilot = Path(
+            copilot_home
+            or os.environ.get("AGENTSCOPE_COPILOT_HOME")
+            or os.environ.get("COPILOT_HOME")
+            or user_home / ".copilot"
+        )
+        kimi = Path(
+            kimi_home
+            or os.environ.get("AGENTSCOPE_KIMI_HOME")
+            or os.environ.get("KIMI_CODE_HOME")
+            or user_home / ".kimi-code"
+        )
+        gemini = Path(
+            gemini_home
+            or os.environ.get("AGENTSCOPE_GEMINI_HOME")
+            or user_home / ".gemini"
         )
         database = Path(
             database_path
@@ -84,6 +114,10 @@ class AgentScopeConfig:
         return cls(
             codex_home=codex,
             headroom_home=headroom,
+            claude_home=claude,
+            copilot_home=copilot,
+            kimi_home=kimi,
+            gemini_home=gemini,
             database_path=database,
             reports_path=reports,
             safe_mode=safe_mode,
