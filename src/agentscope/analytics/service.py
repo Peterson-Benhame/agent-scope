@@ -45,7 +45,10 @@ class AnalyticsService:
         return row[key] if row and row[key] is not None else None
 
     @staticmethod
-    def _percent_change(current: float | int | None, previous: float | int | None) -> float | None:
+    def _percent_change(
+        current: float | int | None,
+        previous: float | int | None,
+    ) -> float | None:
         if current is None or previous is None or float(previous) == 0.0:
             return None
         return ((float(current) - float(previous)) / abs(float(previous))) * 100.0
@@ -57,6 +60,8 @@ class AnalyticsService:
         project_expression: str | None = None,
         model_expression: str | None = None,
         source_expression: str | None = None,
+        user_expression: str | None = None,
+        machine_expression: str | None = None,
         required: list[str] | None = None,
     ) -> tuple[str, list[object]]:
         clauses = list(required or [])
@@ -77,6 +82,12 @@ class AnalyticsService:
         if self.filters.source is not None and source_expression:
             clauses.append(f"{source_expression} = ?")
             params.append(self.filters.source)
+        if self.filters.user is not None and user_expression:
+            clauses.append(f"{user_expression} = ?")
+            params.append(self.filters.user)
+        if self.filters.machine is not None and machine_expression:
+            clauses.append(f"{machine_expression} = ?")
+            params.append(self.filters.machine)
 
         return (" WHERE " + " AND ".join(clauses) if clauses else "", params)
 
@@ -89,12 +100,16 @@ class AnalyticsService:
         project_expression: str = "p.name",
         model_expression: str = "COALESCE(m.name, sm.name)",
         source_expression: str = "src.name",
+        user_expression: str = "COALESCE(u.display_name, u.stable_key)",
+        machine_expression: str = "COALESCE(mc.display_name, mc.stable_key)",
     ) -> int:
         where, params = self._where(
             date_expression=date_expression,
             project_expression=project_expression,
             model_expression=model_expression,
             source_expression=source_expression,
+            user_expression=user_expression,
+            machine_expression=machine_expression,
         )
         row = conn.execute(
             f"SELECT COUNT(*) AS n {table_sql}{where}",
@@ -103,12 +118,16 @@ class AnalyticsService:
         return int(row["n"])
 
     def summary(self) -> AnalyticsSummary:
+        user_expr = "COALESCE(u.display_name, u.stable_key)"
+        machine_expr = "COALESCE(mc.display_name, mc.stable_key)"
         with self.repository.database.connect() as conn:
             sessions_where, sessions_params = self._where(
                 date_expression="s.started_at",
                 project_expression="p.name",
                 model_expression="sm.name",
                 source_expression="src.name",
+                user_expression=user_expr,
+                machine_expression=machine_expr,
             )
             sessions = int(
                 conn.execute(
@@ -118,6 +137,8 @@ class AnalyticsService:
                     LEFT JOIN projects p ON p.id=s.project_id
                     LEFT JOIN models sm ON sm.id=s.model_id
                     JOIN sources src ON src.id=s.source_id
+                    LEFT JOIN users u ON u.id=s.user_id
+                    LEFT JOIN machines mc ON mc.id=s.machine_id
                     """ + sessions_where,
                     sessions_params,
                 ).fetchone()["n"]
@@ -132,6 +153,8 @@ class AnalyticsService:
                     LEFT JOIN models m ON m.id=tr.model_id
                     LEFT JOIN models sm ON sm.id=s.model_id
                     JOIN sources src ON src.id=s.source_id
+                    LEFT JOIN users u ON u.id=s.user_id
+                    LEFT JOIN machines mc ON mc.id=s.machine_id
                 """,
                 date_expression="COALESCE(tr.started_at, s.started_at)",
             )
@@ -144,6 +167,8 @@ class AnalyticsService:
                     LEFT JOIN models sm ON sm.id=s.model_id
                     LEFT JOIN models m ON m.id=s.model_id
                     JOIN sources src ON src.id=s.source_id
+                    LEFT JOIN users u ON u.id=s.user_id
+                    LEFT JOIN machines mc ON mc.id=s.machine_id
                 """,
                 date_expression="msg.timestamp",
                 model_expression="sm.name",
@@ -157,6 +182,8 @@ class AnalyticsService:
                     LEFT JOIN models sm ON sm.id=s.model_id
                     LEFT JOIN models m ON m.id=s.model_id
                     JOIN sources src ON src.id=s.source_id
+                    LEFT JOIN users u ON u.id=s.user_id
+                    LEFT JOIN machines mc ON mc.id=s.machine_id
                 """,
                 date_expression="tc.timestamp",
                 model_expression="sm.name",
@@ -167,6 +194,8 @@ class AnalyticsService:
                 project_expression="p.name",
                 model_expression="COALESCE(tm.name, sm.name)",
                 source_expression="src.name",
+                user_expression=user_expr,
+                machine_expression=machine_expr,
             )
             tokens = conn.execute(
                 """
@@ -183,6 +212,8 @@ class AnalyticsService:
                 LEFT JOIN models tm ON tm.id=tu.model_id
                 LEFT JOIN models sm ON sm.id=s.model_id
                 JOIN sources src ON src.id=s.source_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
                 """ + token_where,
                 token_params,
             ).fetchone()
@@ -192,6 +223,8 @@ class AnalyticsService:
                 project_expression="p.name",
                 model_expression="COALESCE(om.name, sm.name)",
                 source_expression="src.name",
+                user_expression=user_expr,
+                machine_expression=machine_expr,
             )
             optimization = conn.execute(
                 """
@@ -205,6 +238,8 @@ class AnalyticsService:
                 LEFT JOIN models om ON om.id=op.model_id
                 LEFT JOIN models sm ON sm.id=s.model_id
                 LEFT JOIN sources src ON src.id=s.source_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
                 """ + optimization_where,
                 optimization_params,
             ).fetchone()
@@ -214,6 +249,8 @@ class AnalyticsService:
                 project_expression="p.name",
                 model_expression="COALESCE(cm.name, sm.name)",
                 source_expression="src.name",
+                user_expression=user_expr,
+                machine_expression=machine_expr,
             )
             cost = conn.execute(
                 """
@@ -229,6 +266,8 @@ class AnalyticsService:
                 LEFT JOIN models cm ON cm.id=c.model_id
                 LEFT JOIN models sm ON sm.id=s.model_id
                 LEFT JOIN sources src ON src.id=s.source_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
                 """ + cost_where,
                 cost_params,
             ).fetchone()
@@ -288,13 +327,18 @@ class AnalyticsService:
             ),
         }
 
-    def by_project(self) -> list[dict[str, Any]]:
-        where, params = self._where(
-            date_expression="tu.timestamp",
+    def _usage_dimension_where(self, date_expression: str) -> tuple[str, list[object]]:
+        return self._where(
+            date_expression=date_expression,
             project_expression="p.name",
             model_expression="COALESCE(tm.name, sm.name)",
             source_expression="src.name",
+            user_expression="COALESCE(u.display_name, u.stable_key)",
+            machine_expression="COALESCE(mc.display_name, mc.stable_key)",
         )
+
+    def by_project(self) -> list[dict[str, Any]]:
+        where, params = self._usage_dimension_where("tu.timestamp")
         with self.repository.database.connect() as conn:
             rows = conn.execute(
                 """
@@ -310,6 +354,8 @@ class AnalyticsService:
                 LEFT JOIN models tm ON tm.id=tu.model_id
                 LEFT JOIN models sm ON sm.id=s.model_id
                 JOIN sources src ON src.id=s.source_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
                 """ + where + """
                 GROUP BY COALESCE(p.name, '(unknown)')
                 ORDER BY input_tokens DESC, project
@@ -319,12 +365,7 @@ class AnalyticsService:
         return [dict(row) for row in rows]
 
     def by_model(self) -> list[dict[str, Any]]:
-        where, params = self._where(
-            date_expression="tu.timestamp",
-            project_expression="p.name",
-            model_expression="COALESCE(tm.name, sm.name)",
-            source_expression="src.name",
-        )
+        where, params = self._usage_dimension_where("tu.timestamp")
         with self.repository.database.connect() as conn:
             rows = conn.execute(
                 """
@@ -340,6 +381,8 @@ class AnalyticsService:
                 LEFT JOIN models tm ON tm.id=tu.model_id
                 LEFT JOIN models sm ON sm.id=s.model_id
                 JOIN sources src ON src.id=s.source_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
                 """ + where + """
                 GROUP BY COALESCE(tm.name, sm.name, '(unknown)')
                 ORDER BY input_tokens DESC, model
@@ -348,12 +391,89 @@ class AnalyticsService:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def _by_identity(self, dimension: str) -> list[dict[str, Any]]:
+        if dimension not in {"user", "machine"}:
+            raise ValueError(f"Unsupported identity dimension: {dimension}")
+        id_column = "s.user_id" if dimension == "user" else "s.machine_id"
+        table = "users" if dimension == "user" else "machines"
+        alias = "u" if dimension == "user" else "mc"
+        label = f"COALESCE({alias}.display_name, {alias}.stable_key)"
+        where, params = self._where(
+            date_expression="s.started_at",
+            project_expression="p.name",
+            model_expression="sm.name",
+            source_expression="src.name",
+            user_expression="COALESCE(u.display_name, u.stable_key)",
+            machine_expression="COALESCE(mc.display_name, mc.stable_key)",
+            required=[f"{id_column} IS NOT NULL"],
+        )
+        key_column = "user_id" if dimension == "user" else "machine_id"
+        with self.repository.database.connect() as conn:
+            rows = conn.execute(
+                f"""
+                WITH scoped AS (
+                    SELECT s.id, s.user_id, s.machine_id
+                    FROM sessions s
+                    LEFT JOIN projects p ON p.id=s.project_id
+                    LEFT JOIN models sm ON sm.id=s.model_id
+                    JOIN sources src ON src.id=s.source_id
+                    LEFT JOIN users u ON u.id=s.user_id
+                    LEFT JOIN machines mc ON mc.id=s.machine_id
+                    {where}
+                ),
+                token_totals AS (
+                    SELECT sc.{key_column} AS identity_id,
+                           COALESCE(SUM(tu.input_tokens), 0) AS input_tokens,
+                           COALESCE(SUM(tu.cached_input_tokens), 0) AS cached_input_tokens,
+                           COALESCE(SUM(tu.output_tokens), 0) AS output_tokens,
+                           COALESCE(SUM(tu.total_tokens), 0) AS total_tokens
+                    FROM scoped sc
+                    LEFT JOIN token_usage tu ON tu.session_id=sc.id
+                    GROUP BY sc.{key_column}
+                ),
+                cost_totals AS (
+                    SELECT sc.{key_column} AS identity_id,
+                           SUM(c.observed_cost_usd) AS observed_cost_usd
+                    FROM scoped sc
+                    LEFT JOIN costs c ON c.session_id=sc.id
+                    GROUP BY sc.{key_column}
+                ),
+                session_totals AS (
+                    SELECT {key_column} AS identity_id, COUNT(*) AS sessions
+                    FROM scoped
+                    GROUP BY {key_column}
+                )
+                SELECT {label} AS {dimension},
+                       st.sessions,
+                       tt.input_tokens,
+                       tt.cached_input_tokens,
+                       tt.output_tokens,
+                       tt.total_tokens,
+                       ct.observed_cost_usd
+                FROM session_totals st
+                JOIN {table} {alias} ON {alias}.id=st.identity_id
+                JOIN token_totals tt ON tt.identity_id=st.identity_id
+                LEFT JOIN cost_totals ct ON ct.identity_id=st.identity_id
+                ORDER BY tt.input_tokens DESC, {dimension}
+                """,
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def by_user(self) -> list[dict[str, Any]]:
+        return self._by_identity("user")
+
+    def by_machine(self) -> list[dict[str, Any]]:
+        return self._by_identity("machine")
+
     def by_agent(self) -> list[dict[str, Any]]:
         where, params = self._where(
             date_expression="COALESCE(sa.started_at, s.started_at)",
             project_expression="p.name",
             model_expression="sm.name",
             source_expression="src.name",
+            user_expression="COALESCE(u.display_name, u.stable_key)",
+            machine_expression="COALESCE(mc.display_name, mc.stable_key)",
         )
         with self.repository.database.connect() as conn:
             rows = conn.execute(
@@ -367,6 +487,8 @@ class AnalyticsService:
                 LEFT JOIN projects p ON p.id=s.project_id
                 LEFT JOIN models sm ON sm.id=s.model_id
                 JOIN sources src ON src.id=s.source_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
                 """ + where + """
                 GROUP BY a.id, a.name, a.type
                 ORDER BY sessions DESC, agent
@@ -381,6 +503,8 @@ class AnalyticsService:
             project_expression="p.name",
             model_expression="sm.name",
             source_expression="src.name",
+            user_expression="COALESCE(u.display_name, u.stable_key)",
+            machine_expression="COALESCE(mc.display_name, mc.stable_key)",
         )
         with self.repository.database.connect() as conn:
             rows = conn.execute(
@@ -394,6 +518,8 @@ class AnalyticsService:
                 LEFT JOIN projects p ON p.id=s.project_id
                 LEFT JOIN models sm ON sm.id=s.model_id
                 JOIN sources src ON src.id=s.source_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
                 """ + where + """
                 GROUP BY sk.id, sk.name, ss.usage_type
                 ORDER BY skill, usage_type
@@ -408,6 +534,8 @@ class AnalyticsService:
             project_expression="p.name",
             model_expression="sm.name",
             source_expression="src.name",
+            user_expression="COALESCE(u.display_name, u.stable_key)",
+            machine_expression="COALESCE(mc.display_name, mc.stable_key)",
         )
         with self.repository.database.connect() as conn:
             rows = conn.execute(
@@ -424,6 +552,8 @@ class AnalyticsService:
                 LEFT JOIN projects p ON p.id=s.project_id
                 LEFT JOIN models sm ON sm.id=s.model_id
                 JOIN sources src ON src.id=s.source_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
                 """ + where + """
                 GROUP BY t.id, t.name, t.category
                 ORDER BY calls DESC, tool
@@ -433,12 +563,7 @@ class AnalyticsService:
         return [dict(row) for row in rows]
 
     def by_day(self) -> list[dict[str, Any]]:
-        where, params = self._where(
-            date_expression="tu.timestamp",
-            project_expression="p.name",
-            model_expression="COALESCE(tm.name, sm.name)",
-            source_expression="src.name",
-        )
+        where, params = self._usage_dimension_where("tu.timestamp")
         with self.repository.database.connect() as conn:
             rows = conn.execute(
                 """
@@ -452,6 +577,8 @@ class AnalyticsService:
                 LEFT JOIN models tm ON tm.id=tu.model_id
                 LEFT JOIN models sm ON sm.id=s.model_id
                 JOIN sources src ON src.id=s.source_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
                 """ + where + """
                 GROUP BY substr(tu.timestamp, 1, 10)
                 ORDER BY day
@@ -466,6 +593,8 @@ class AnalyticsService:
             project_expression="p.name",
             model_expression="COALESCE(om.name, sm.name)",
             source_expression="src.name",
+            user_expression="COALESCE(u.display_name, u.stable_key)",
+            machine_expression="COALESCE(mc.display_name, mc.stable_key)",
         )
         with self.repository.database.connect() as conn:
             rows = conn.execute(
@@ -483,6 +612,8 @@ class AnalyticsService:
                 LEFT JOIN models om ON om.id=op.model_id
                 LEFT JOIN models sm ON sm.id=s.model_id
                 LEFT JOIN sources src ON src.id=s.source_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
                 """ + where + """
                 GROUP BY o.id, o.name
                 ORDER BY optimizer
@@ -497,6 +628,8 @@ class AnalyticsService:
             project_expression="p.name",
             model_expression="COALESCE(om.name, sm.name)",
             source_expression="src.name",
+            user_expression="COALESCE(u.display_name, u.stable_key)",
+            machine_expression="COALESCE(mc.display_name, mc.stable_key)",
         )
         with self.repository.database.connect() as conn:
             rows = conn.execute(
@@ -511,6 +644,8 @@ class AnalyticsService:
                 LEFT JOIN models om ON om.id=op.model_id
                 LEFT JOIN models sm ON sm.id=s.model_id
                 LEFT JOIN sources src ON src.id=s.source_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
                 """ + where + """
                 GROUP BY substr(op.timestamp, 1, 10)
                 ORDER BY day
@@ -525,6 +660,8 @@ class AnalyticsService:
             project_expression="p.name",
             model_expression="COALESCE(cm.name, sm.name)",
             source_expression="src.name",
+            user_expression="COALESCE(u.display_name, u.stable_key)",
+            machine_expression="COALESCE(mc.display_name, mc.stable_key)",
             required=["c.period_start IS NOT NULL"],
         )
         with self.repository.database.connect() as conn:
@@ -539,6 +676,8 @@ class AnalyticsService:
                 LEFT JOIN models cm ON cm.id=c.model_id
                 LEFT JOIN models sm ON sm.id=s.model_id
                 LEFT JOIN sources src ON src.id=s.source_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
                 """ + where + """
                 GROUP BY substr(c.period_start, 1, 10)
                 ORDER BY day
