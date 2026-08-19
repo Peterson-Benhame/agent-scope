@@ -14,7 +14,7 @@ The current implementation ingests OpenAI Codex session history and Headroom opt
 - tool and MCP calls;
 - Headroom compression and cache savings;
 - source-reported and estimated costs without presenting estimates as billing facts;
-- trends by day, project, and model;
+- trends by day, project, model, user, and machine;
 - filtered periods with comparison against the previous equivalent period.
 
 Headroom is modeled as an **Optimizer**, not an Agent.
@@ -74,6 +74,20 @@ agentscope collect
 
 A disabled adapter is not discovered or collected. `agentscope status` reports whether each enabled source was detected and how many supported artifacts were found.
 
+### User and machine identity
+
+AgentScope keeps the human user and the machine as separate dimensions. Local collection creates stable hashed keys from local OS identity signals and records the local user with confidence `inferred`; provider adapters may later supply an `exact` provider user identity when the provider exposes one safely.
+
+Display names are labels only and never uniqueness keys. They can be customized without changing stable identity:
+
+```powershell
+$env:AGENTSCOPE_USER_NAME = "Dev A"
+$env:AGENTSCOPE_MACHINE_NAME = "Notebook A"
+agentscope collect
+```
+
+A user can therefore be associated with multiple machines without being counted as a different person solely because the equipment changed.
+
 ## CLI
 
 Collect new or changed local data:
@@ -108,7 +122,7 @@ Generate the local HTML report:
 agentscope report
 ```
 
-### Filter analytics by period
+### Filter analytics
 
 The `analyze`, `export`, and `report` commands share the same filters.
 
@@ -127,13 +141,16 @@ agentscope report --from 2026-08-01 --to 2026-08-18
 
 Custom `--from`/`--to` values override `--period`. Dates use ISO `YYYY-MM-DD` and are inclusive. With no period/date filter, AgentScope preserves the all-history behavior.
 
-Filters can also restrict project, model, and source:
+Filters can restrict project, model, source, user, and machine:
 
 ```powershell
 agentscope analyze --project BN.S584.PerfilInvestidor --period 30d
 agentscope export --model gpt-5.6-terra --period month
 agentscope report --source codex --from 2026-08-01 --to 2026-08-18
+agentscope report --user "Dev A" --machine "Notebook A" --period 30d
 ```
+
+User/machine filters accept the display label used in analytics. The safe session export also carries the corresponding stable keys so offline team consolidation can preserve identity without relying on display names.
 
 The filtered HTML report displays the selected period and, for bounded periods, compares key metrics with the immediately preceding equivalent period.
 
@@ -187,6 +204,8 @@ reports/
 ├── optimizations.csv
 ├── usage_by_project.csv
 ├── usage_by_model.csv
+├── usage_by_user.csv
+├── usage_by_machine.csv
 ├── usage_by_day.csv
 ├── datasets.json
 └── report.html
@@ -216,6 +235,8 @@ high
 medium
 unknown
 ```
+
+Local user identity uses the same principle: inferred OS identity is marked `inferred`; an exact provider identity is only used when explicit provider evidence exists.
 
 Likewise, a skill being available does not prove it was used. AgentScope records:
 
