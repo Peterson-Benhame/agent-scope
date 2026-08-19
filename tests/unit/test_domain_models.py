@@ -2,8 +2,11 @@ from agentscope.domain.model_normalization import normalize_model_name
 from agentscope.domain.models import (
     AgentEvidence,
     CorrelationConfidence,
+    IdentityConfidence,
+    NormalizedMachine,
     NormalizedMessage,
     NormalizedSession,
+    NormalizedUser,
     SkillEvidence,
     SkillUsageType,
 )
@@ -15,6 +18,29 @@ def test_skill_usage_type_has_distinct_states():
 
 def test_correlation_confidence_has_explicit_levels():
     assert [x.value for x in CorrelationConfidence] == ["exact", "high", "medium", "unknown"]
+
+
+def test_identity_confidence_has_explicit_levels():
+    assert [x.value for x in IdentityConfidence] == ["exact", "inferred", "unknown"]
+
+
+def test_normalized_user_defaults_to_unknown_confidence():
+    user = NormalizedUser(stable_key="user-key")
+
+    assert user.display_name is None
+    assert user.provider_user_id is None
+    assert user.provider is None
+    assert user.confidence is IdentityConfidence.UNKNOWN
+    assert user.metadata == {}
+
+
+def test_normalized_machine_keeps_identity_separate_from_user():
+    machine = NormalizedMachine(stable_key="machine-key", display_name="Notebook")
+
+    assert machine.stable_key == "machine-key"
+    assert machine.display_name == "Notebook"
+    assert machine.os is None
+    assert machine.metadata == {}
 
 
 def test_normalized_session_defaults_are_provider_neutral():
