@@ -103,3 +103,24 @@ def test_team_report_renders_budget_only_when_provided(tmp_path):
     assert "US$ 100,00" in html
     assert "50,00%" in html
     assert "Projeção até o fim do mês" in html
+
+
+def test_team_report_exposes_data_quality_without_inventing_provider_diagnostics(tmp_path):
+    repo = team_repo(tmp_path)
+    with repo.database.connect() as conn:
+        conn.execute(
+            "INSERT INTO import_errors(source, file, error_type, error_message) VALUES('team', 'bundle', 'validation', 'synthetic')"
+        )
+    analytics = TeamAnalyticsService(repo)
+    output = tmp_path / "team-quality.html"
+
+    generate_team_html_report(repo, analytics, output)
+
+    html = output.read_text(encoding="utf-8")
+    assert "Tokens sem modelo" in html
+    assert "0,00%" in html
+    assert "Erros de importação" in html
+    assert "Confiança de identidade" in html
+    assert "Cobertura observada por fonte" in html
+    assert "codex" in html
+    assert "Não transportado pelo Team Bundle v1" in html
