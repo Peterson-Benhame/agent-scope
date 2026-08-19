@@ -23,6 +23,11 @@ def local_bundle(
     input_tokens: int,
     cached_tokens: int,
     output_tokens: int,
+    observed_cost: float | None = None,
+    estimated_cost: float | None = None,
+    total_savings: float | None = None,
+    optimizer_compression_savings: float | None = None,
+    optimizer_cache_savings: float | None = None,
 ):
     db = Database(tmp_path / f"{name}.db")
     db.initialize()
@@ -105,6 +110,52 @@ def local_bundle(
                 f"token-{name}",
             ),
         )
+        if any(value is not None for value in (observed_cost, estimated_cost, total_savings)):
+            conn.execute(
+                """
+                INSERT INTO costs(
+                    session_id, model_id, period_start, observed_cost_usd,
+                    estimated_raw_cost_usd, total_savings_usd, event_key
+                ) VALUES(?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    model_id,
+                    started_at,
+                    observed_cost,
+                    estimated_cost,
+                    total_savings,
+                    f"cost-{name}",
+                ),
+            )
+        if any(
+            value is not None
+            for value in (optimizer_compression_savings, optimizer_cache_savings)
+        ):
+            conn.execute(
+                "INSERT INTO optimizers(name, version) VALUES('headroom', 'test')"
+            )
+            optimizer_id = conn.execute(
+                "SELECT id FROM optimizers WHERE name='headroom' AND version='test'"
+            ).fetchone()[0]
+            conn.execute(
+                """
+                INSERT INTO optimizations(
+                    optimizer_id, session_id, timestamp, model_id,
+                    compression_savings_usd, cache_savings_usd,
+                    correlation_confidence, event_key
+                ) VALUES(?, ?, ?, ?, ?, ?, 'exact', ?)
+                """,
+                (
+                    optimizer_id,
+                    session_id,
+                    started_at,
+                    model_id,
+                    optimizer_compression_savings,
+                    optimizer_cache_savings,
+                    f"optimizer-{name}",
+                ),
+            )
     return build_team_bundle(Repository(db), organization="Org", team="Backend")
 
 
@@ -145,6 +196,67 @@ def consolidated_team_repo(tmp_path):
     repo = Repository(team_db)
     import_team_bundle(repo, bundle_a)
     import_team_bundle(repo, bundle_b)
+    return repo
+
+
+def financial_team_repo(tmp_path):
+    bundles = [
+        local_bundle(
+            tmp_path,
+            name="cost-a",
+            user_key="cost-user-a",
+            user_name="Dev Cost A",
+            machine_key="cost-machine-a",
+            machine_name="Notebook Cost A",
+            source="codex",
+            project="Projeto Cost A",
+            model="gpt-cost-a",
+            started_at="2026-08-18T09:00:00Z",
+            input_tokens=100,
+            cached_tokens=50,
+            output_tokens=20,
+            observed_cost=4.0,
+            total_savings=1.5,
+        ),
+        local_bundle(
+            tmp_path,
+            name="cost-b",
+            user_key="cost-user-b",
+            user_name="Dev Cost B",
+            machine_key="cost-machine-b",
+            machine_name="Notebook Cost B",
+            source="claude_code",
+            project="Projeto Cost B",
+            model="claude-cost-b",
+            started_at="2026-08-18T10:00:00Z",
+            input_tokens=200,
+            cached_tokens=75,
+            output_tokens=30,
+            estimated_cost=7.0,
+        ),
+        local_bundle(
+            tmp_path,
+            name="cost-c",
+            user_key="cost-user-c",
+            user_name="Dev Cost C",
+            machine_key="cost-machine-c",
+            machine_name="Notebook Cost C",
+            source="gemini",
+            project="Projeto Cost C",
+            model="gemini-cost-c",
+            started_at="2026-08-18T11:00:00Z",
+            input_tokens=300,
+            cached_tokens=100,
+            output_tokens=40,
+            optimizer_compression_savings=2.0,
+            optimizer_cache_savings=3.0,
+        ),
+    ]
+    team_db = Database(tmp_path / "team-financial.db")
+    team_db.initialize()
+    repo = Repository(team_db)
+    for bundle in bundles:
+        import_team_bundle(repo, bundle)
     return repo
 
 
@@ -202,3 +314,49 @@ def test_team_summary_obeys_shared_user_and_date_filters(tmp_path):
     assert summary.machines == 1
     assert summary.sessions == 1
     assert summary.total_tokens == 2300
+
+
+def test_team_cost_attribution_keeps_observed_and_estimated_separate(tmp_path):
+    analytics = TeamAnalyticsService(financial_team_repo(tmp_path))
+
+    by_user = {row["user"]: row for row in analytics.cost_by_user()}
+    assert by_user["Dev Cost A"]["observed_cost_usd"] == 4.0
+    assert by_user["Dev Cost A"]["estimated_raw_cost_usd"] is None
+    assert by_user["Dev Cost B"]["observed_cost_usd"] is None
+    assert by_user["Dev Cost B"]["estimated_raw_cost_usd"] == 7.0
+    assert "Dev Cost C" not in by_user
+
+    assert {row["project"] for row in analytics.cost_by_project()} == {
+        "Projeto Cost A",
+        "Projeto Cost B",
+    }
+    assert {row["source"] for row in analytics.cost_by_source()} == {
+        "codex",
+        "claude_code",
+    }
+    assert {row["model"] for row in analytics.cost_by_model()} == {
+        "gpt-cost-a",
+        "claude-cost-b",
+    }
+
+
+def test_team_savings_attribution_combines_cost_and_optimizer_sources(tmp_path):
+    analytics = TeamAnalyticsService(financial_team_repo(tmp_path))
+
+    by_user = {row["user"]: row for row in analytics.savings_by_user()}
+    assert by_user["Dev Cost A"]["total_savings_usd"] == 1.5
+    assert by_user["Dev Cost C"]["total_savings_usd"] == 5.0
+    assert "Dev Cost B" not in by_user
+
+    assert {row["project"] for row in analytics.savings_by_project()} == {
+        "Projeto Cost A",
+        "Projeto Cost C",
+    }
+    assert {row["source"] for row in analytics.savings_by_source()} == {
+        "codex",
+        "gemini",
+    }
+    assert {row["model"] for row in analytics.savings_by_model()} == {
+        "gpt-cost-a",
+        "gemini-cost-c",
+    }
