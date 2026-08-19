@@ -102,6 +102,8 @@ def _analytics_filter(
     project: str | None,
     model: str | None,
     source: str | None,
+    user: str | None,
+    machine: str | None,
 ) -> AnalyticsFilter:
     from_date = _parse_date(from_value, "--from")
     to_date = _parse_date(to_value, "--to")
@@ -118,6 +120,8 @@ def _analytics_filter(
         project=project,
         model=model,
         source=source,
+        user=user,
+        machine=machine,
     )
 
 
@@ -191,6 +195,8 @@ def analyze(
     project: Optional[str] = typer.Option(None, "--project"),
     model: Optional[str] = typer.Option(None, "--model"),
     source: Optional[str] = typer.Option(None, "--source"),
+    user: Optional[str] = typer.Option(None, "--user"),
+    machine: Optional[str] = typer.Option(None, "--machine"),
 ) -> None:
     config = AgentScopeConfig.from_env(database_path=database)
     repo = _repository(config.database_path)
@@ -201,6 +207,8 @@ def analyze(
         project=project,
         model=model,
         source=source,
+        user=user,
+        machine=machine,
     )
     summary = AnalyticsService(repo, filters).summary()
     typer.echo(json.dumps(asdict(summary), ensure_ascii=False, indent=2))
@@ -221,6 +229,8 @@ def export_command(
     project: Optional[str] = typer.Option(None, "--project"),
     model: Optional[str] = typer.Option(None, "--model"),
     source: Optional[str] = typer.Option(None, "--source"),
+    user: Optional[str] = typer.Option(None, "--user"),
+    machine: Optional[str] = typer.Option(None, "--machine"),
 ) -> None:
     config = AgentScopeConfig.from_env(
         database_path=database,
@@ -234,6 +244,8 @@ def export_command(
         project=project,
         model=model,
         source=source,
+        user=user,
+        machine=machine,
     )
     analytics = AnalyticsService(repo, filters)
     created = export_datasets(
@@ -256,6 +268,8 @@ def report(
     project: Optional[str] = typer.Option(None, "--project"),
     model: Optional[str] = typer.Option(None, "--model"),
     source: Optional[str] = typer.Option(None, "--source"),
+    user: Optional[str] = typer.Option(None, "--user"),
+    machine: Optional[str] = typer.Option(None, "--machine"),
 ) -> None:
     config = AgentScopeConfig.from_env(database_path=database)
     repo = _repository(config.database_path)
@@ -266,6 +280,8 @@ def report(
         project=project,
         model=model,
         source=source,
+        user=user,
+        machine=machine,
     )
     analytics = AnalyticsService(repo, filters)
     target = output or (config.reports_path / "report.html")
