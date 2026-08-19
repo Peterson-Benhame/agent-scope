@@ -67,6 +67,44 @@ def _budget_section(budget: BudgetStatus | None) -> str:
     )
 
 
+def _quality_section(quality: dict) -> str:
+    identity = ", ".join(
+        f"{_cell(row['confidence'])}: {format_integer(int(row['users']))}"
+        for row in quality["identity_confidence"]
+    ) or "Não disponível"
+    correlation = ", ".join(
+        f"{_cell(row['confidence'])}: {format_integer(int(row['events']))}"
+        for row in quality["optimization_confidence"]
+    ) or "Não disponível"
+    coverage_rows = "".join(
+        "<tr>"
+        f"<td>{_cell(row['source'])}</td>"
+        f"<td>{format_integer(int(row['sessions']))}</td>"
+        f"<td>{'Sim' if row['has_tokens'] else 'Não'}</td>"
+        f"<td>{'Sim' if row['has_cache'] else 'Não'}</td>"
+        f"<td>{'Sim' if row['has_cost'] else 'Não'}</td>"
+        "</tr>"
+        for row in quality["source_coverage"]
+    )
+    if not coverage_rows:
+        coverage_rows = '<tr><td colspan="5">Nenhum dado disponível.</td></tr>'
+    return (
+        "<section><h2>Qualidade dos dados</h2>"
+        "<div class='cards'>"
+        f"<div class='card'><span>Tokens sem modelo</span><strong>{format_percentage(quality['unknown_model_ratio'])}</strong></div>"
+        f"<div class='card'><span>Erros de importação</span><strong>{format_integer(int(quality['import_errors']))}</strong></div>"
+        "</div>"
+        f"<p><strong>Confiança de identidade:</strong> {identity}</p>"
+        f"<p><strong>Confiança de correlação:</strong> {correlation}</p>"
+        "<h3>Cobertura observada por fonte</h3>"
+        "<table><thead><tr><th>Fonte</th><th>Sessões</th><th>Tokens</th><th>Cache</th><th>Custo</th></tr></thead>"
+        f"<tbody>{coverage_rows}</tbody></table>"
+        f"<p class='note'>Diagnósticos de provider: {_cell(quality['diagnostics_note'])}.</p>"
+        "<p class='note'>Cobertura observada indica dados presentes no banco consolidado; não substitui a declaração de capabilities do adapter.</p>"
+        "</section>"
+    )
+
+
 def generate_team_html_report(
     repository: Repository,
     analytics: TeamAnalyticsService,
@@ -76,6 +114,7 @@ def generate_team_html_report(
 ) -> Path:
     del repository
     summary = analytics.summary()
+    quality = analytics.data_quality()
     html = f"""<!doctype html>
 <html lang="pt-BR">
 <head>
@@ -113,7 +152,7 @@ th, td {{ text-align:left; padding:8px; border-bottom:1px solid #e5e7eb; }}
 {_usage_table(analytics.by_source(), 'source', 'Por fonte')}
 {_usage_table(analytics.by_model(), 'model', 'Por modelo')}
 {_daily_table(analytics.by_day())}
-<section><h2>Qualidade dos dados</h2><p class="note">Métricas de cobertura e confiança são apresentadas quando disponíveis.</p></section>
+{_quality_section(quality)}
 </body>
 </html>
 """
