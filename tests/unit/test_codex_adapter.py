@@ -1,6 +1,7 @@
 import shutil
 from pathlib import Path
 
+from agentscope.domain.models import NormalizedMachine, NormalizedUser
 from agentscope.sources.base import CollectRequest, DiscoveryContext
 from agentscope.sources.codex import CodexAdapter
 from agentscope.storage.database import Database
@@ -75,3 +76,39 @@ def test_codex_adapter_collect_is_idempotent(tmp_path):
         assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 3
         assert conn.execute("SELECT COUNT(*) FROM token_usage").fetchone()[0] == 1
+
+
+def test_codex_adapter_associates_explicit_local_identity(tmp_path):
+    db, repo = make_repo(tmp_path)
+    home, _ = make_codex_home(tmp_path)
+    adapter = CodexAdapter()
+    discovery = adapter.discover(
+        DiscoveryContext(user_home=tmp_path, overrides={"codex": home})
+    )
+    user = NormalizedUser(stable_key="local-user:test", display_name="Dev A")
+    machine = NormalizedMachine(
+        stable_key="local-machine:test",
+        display_name="Notebook A",
+    )
+
+    adapter.collect(
+        CollectRequest(
+            repository=repo,
+            discovery=discovery,
+            user=user,
+            machine=machine,
+        )
+    )
+
+    with db.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT u.display_name AS user_name, m.display_name AS machine_name
+            FROM sessions s
+            JOIN users u ON u.id=s.user_id
+            JOIN machines m ON m.id=s.machine_id
+            WHERE s.external_session_id='session-1'
+            """
+        ).fetchone()
+    assert row["user_name"] == "Dev A"
+    assert row["machine_name"] == "Notebook A"
