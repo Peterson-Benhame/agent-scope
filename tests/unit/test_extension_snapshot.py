@@ -98,6 +98,7 @@ def test_build_extension_snapshot_has_stable_allow_listed_contract(tmp_path):
     assert snapshot["summary"]["sessions"] == 1
     assert snapshot["summary"]["total_tokens"] == 150
     assert snapshot["summary"]["observed_cost_usd"] == 0.12
+    assert snapshot["summary"]["estimated_savings_usd"] == 0.03
     assert "example-project" in snapshot["dimensions"]["projects"]
     assert "codex" in snapshot["dimensions"]["sources"]
 
@@ -106,7 +107,7 @@ def test_build_extension_snapshot_has_stable_allow_listed_contract(tmp_path):
     assert r"C:\private\provider\rollout.jsonl" not in serialized
 
 
-def test_extension_snapshot_keeps_unknown_cost_null(tmp_path):
+def test_extension_snapshot_keeps_unknown_money_null(tmp_path):
     repo, db = make_repo(tmp_path)
     snapshot = build_extension_snapshot(
         repo,
@@ -117,3 +118,4 @@ def test_extension_snapshot_keeps_unknown_cost_null(tmp_path):
 
     assert snapshot["summary"]["sessions"] == 1
     assert snapshot["summary"]["observed_cost_usd"] is None
+    assert snapshot["summary"]["estimated_savings_usd"] is None
