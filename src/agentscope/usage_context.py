@@ -91,13 +91,18 @@ def infer_codex_usage_context(session: NormalizedSession) -> SessionUsageContext
     )
 
 
+def ensure_usage_context_schema(repository: Repository) -> None:
+    with repository.database.connect() as conn:
+        conn.executescript(_USAGE_CONTEXT_SCHEMA)
+
+
 def persist_session_usage_context(
     repository: Repository,
     session_id: int,
     context: SessionUsageContext,
 ) -> None:
+    ensure_usage_context_schema(repository)
     with repository.database.connect() as conn:
-        conn.executescript(_USAGE_CONTEXT_SCHEMA)
         conn.execute(
             """
             INSERT INTO session_usage_context(
