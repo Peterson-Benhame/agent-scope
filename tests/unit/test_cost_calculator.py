@@ -118,10 +118,10 @@ def test_calculates_each_model_from_uncached_cached_cache_write_and_output(tmp_p
         external_session_id="sol-session",
         model="gpt-5.6-sol",
         timestamp="2026-08-19T12:00:00Z",
-        input_tokens=1_000_000,
-        cached_input_tokens=200_000,
-        cache_write_input_tokens=100_000,
-        output_tokens=100_000,
+        input_tokens=100_000,
+        cached_input_tokens=20_000,
+        cache_write_input_tokens=10_000,
+        output_tokens=10_000,
     )
     terra_usage_id = _add_openai_usage(
         repo,
@@ -140,9 +140,9 @@ def test_calculates_each_model_from_uncached_cached_cache_write_and_output(tmp_p
     assert summary.events_priced == 2
     assert summary.events_unpriced == 0
     assert summary.complete is True
-    assert summary.by_model["gpt-5.6-sol"] == pytest.approx(7.225)
+    assert summary.by_model["gpt-5.6-sol"] == pytest.approx(0.7225)
     assert summary.by_model["gpt-5.6-terra"] == pytest.approx(1.2)
-    assert summary.total_estimated_cost_usd == pytest.approx(8.425)
+    assert summary.total_estimated_cost_usd == pytest.approx(1.9225)
 
     with db.connect() as conn:
         rows = conn.execute(
@@ -154,7 +154,7 @@ def test_calculates_each_model_from_uncached_cached_cache_write_and_output(tmp_p
             """
         ).fetchall()
     assert [row["token_usage_id"] for row in rows] == [sol_usage_id, terra_usage_id]
-    assert sum(row["estimated_raw_cost_usd"] for row in rows) == pytest.approx(8.425)
+    assert sum(row["estimated_raw_cost_usd"] for row in rows) == pytest.approx(1.9225)
     assert {row["pricing_version"] for row in rows} == {"test-pricing-v1"}
 
 
