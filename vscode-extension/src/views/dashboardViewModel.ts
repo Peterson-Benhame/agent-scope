@@ -6,6 +6,7 @@ import {
 } from '../contracts/snapshot';
 
 export interface DashboardMetric {
+  label?: string;
   value: string;
   subtitle?: string;
 }
@@ -106,6 +107,37 @@ function metric(
   };
 }
 
+function estimatedCostMetric(snapshot: ExtensionSnapshot): DashboardMetric {
+  const base = metric(
+    formatUsd(snapshot.summary.estimated_cost_usd),
+    snapshot.availability.estimated_cost,
+  );
+  let label = 'Equivalente API';
+  let billingNote: string;
+
+  switch (snapshot.billing.mode) {
+    case 'api':
+      label = 'Custo estimado API';
+      billingNote = 'Estimativa baseada em tokens e preços da API; não é cobrança observada.';
+      break;
+    case 'chatgpt_codex_plan':
+      billingNote = 'Uso identificado como plano ChatGPT/Codex; o valor é referência pelos preços da API e não representa gasto real.';
+      break;
+    case 'mixed':
+      billingNote = 'O período contém mais de uma forma de cobrança; o valor é referência pelos preços da API e não representa gasto real.';
+      break;
+    default:
+      billingNote = 'Forma de cobrança não identificada; o valor usa preços da API como referência e não representa gasto real.';
+      break;
+  }
+
+  return {
+    label,
+    value: base.value,
+    subtitle: [base.subtitle, billingNote].filter(Boolean).join(' '),
+  };
+}
+
 export function toDashboardViewModel(
   snapshot: ExtensionSnapshot,
   filters: SnapshotFilters,
@@ -126,10 +158,7 @@ export function toDashboardViewModel(
         formatUsd(snapshot.summary.observed_cost_usd),
         snapshot.availability.observed_cost,
       ),
-      estimatedCost: metric(
-        formatUsd(snapshot.summary.estimated_cost_usd),
-        snapshot.availability.estimated_cost,
-      ),
+      estimatedCost: estimatedCostMetric(snapshot),
       estimatedSavings: metric(
         formatUsd(snapshot.summary.estimated_savings_usd),
         snapshot.availability.estimated_savings,
