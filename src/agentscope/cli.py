@@ -20,8 +20,12 @@ from agentscope.reporting.export import export_datasets
 from agentscope.reporting.html_report import generate_html_report
 from agentscope.storage.database import Database
 from agentscope.storage.repository import Repository
+from agentscope.team.bundle import build_team_bundle
+from agentscope.team.importer import import_team_bundle
 
 app = typer.Typer(help="Local-first observability and analytics for agent execution histories.")
+team_app = typer.Typer(help="Export and import sanitized team telemetry bundles.")
+app.add_typer(team_app, name="team")
 
 
 def _render_collect_progress(event: ProgressEvent) -> None:
@@ -274,6 +278,70 @@ def report(
     target = output or (config.reports_path / "report.html")
     generate_html_report(repo, analytics, target, filters=filters)
     typer.echo(f"report={target}")
+
+
+@team_app.command("export")
+def team_export(
+    output: Path = typer.Option(..., "--output"),
+    database: Optional[Path] = typer.Option(None, "--database"),
+    organization: Optional[str] = typer.Option(None, "--organization"),
+    team: Optional[str] = typer.Option(None, "--team"),
+    from_value: Optional[str] = typer.Option(None, "--from"),
+    to_value: Optional[str] = typer.Option(None, "--to"),
+    period: Optional[str] = typer.Option(None, "--period"),
+    project: Optional[str] = typer.Option(None, "--project"),
+    model: Optional[str] = typer.Option(None, "--model"),
+    source: Optional[str] = typer.Option(None, "--source"),
+    user: Optional[str] = typer.Option(None, "--user"),
+    machine: Optional[str] = typer.Option(None, "--machine"),
+) -> None:
+    config = AgentScopeConfig.from_env(database_path=database)
+    repo = _repository(config.database_path)
+    filters = _analytics_filter(
+        period=period,
+        from_value=from_value,
+        to_value=to_value,
+        project=project,
+        model=model,
+        source=source,
+        user=user,
+        machine=machine,
+    )
+    bundle = build_team_bundle(
+        repo,
+        analytics_filter=filters,
+        organization=organization,
+        team=team,
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(bundle, ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    typer.echo(f"bundle_id={bundle['bundle_id']} output={output}")
+
+
+@team_app.command("import")
+def team_import(
+    bundle_path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
+    database: Optional[Path] = typer.Option(None, "--database"),
+) -> None:
+    config = AgentScopeConfig.from_env(database_path=database)
+    repo = _repository(config.database_path)
+    try:
+        bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+        summary = import_team_bundle(repo, bundle)
+    except (OSError, json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
+        typer.echo(f"error={exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(
+        f"bundle_id={summary.bundle_id} sessions_imported={summary.sessions_imported} "
+        f"events_imported={summary.events_imported} events_skipped={summary.events_skipped} "
+        f"errors={summary.errors}"
+    )
+    if summary.errors:
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":
