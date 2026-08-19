@@ -47,6 +47,21 @@ const snapshot: ExtensionSnapshot = {
   quality: { import_errors: 0, tokens_without_model: 0, identity_confidence: {}, correlation_confidence: {} },
 };
 
+function withBilling(
+  mode: 'api' | 'chatgpt_codex_plan' | 'unknown' | 'mixed',
+  estimatedCostBasis: 'openai_api_estimate' | 'openai_api_equivalent',
+): ExtensionSnapshot {
+  return {
+    ...snapshot,
+    billing: {
+      mode,
+      confidence: mode === 'mixed' ? 'mixed' : mode === 'unknown' ? 'unknown' : 'explicit',
+      estimated_cost_basis: estimatedCostBasis,
+      is_observed_spend: false,
+    },
+  } as ExtensionSnapshot;
+}
+
 describe('dashboard view model', () => {
   it('formats executive cards using pt-BR presentation', () => {
     const vm = toDashboardViewModel(snapshot, { period: '7d' });
@@ -80,6 +95,35 @@ describe('dashboard view model', () => {
       vm.cards.observedCost.subtitle,
       'A fonte selecionada não informa custo monetário observado.',
     );
+  });
+
+  it('labels unknown billing as API equivalent rather than spend', () => {
+    const vm = toDashboardViewModel(
+      withBilling('unknown', 'openai_api_equivalent'),
+      { period: '7d' },
+    );
+    assert.strictEqual(vm.cards.estimatedCost.label, 'Equivalente API');
+    assert.ok(vm.cards.estimatedCost.subtitle?.includes('não representa gasto real'));
+  });
+
+  it('labels explicit API billing as estimated API cost', () => {
+    const vm = toDashboardViewModel(
+      withBilling('api', 'openai_api_estimate'),
+      { period: '7d' },
+    );
+    assert.strictEqual(vm.cards.estimatedCost.label, 'Custo estimado API');
+    assert.ok(vm.cards.estimatedCost.subtitle?.includes('não é cobrança observada'));
+  });
+
+  it('labels plan and mixed billing as API equivalent', () => {
+    for (const mode of ['chatgpt_codex_plan', 'mixed'] as const) {
+      const vm = toDashboardViewModel(
+        withBilling(mode, 'openai_api_equivalent'),
+        { period: '7d' },
+      );
+      assert.strictEqual(vm.cards.estimatedCost.label, 'Equivalente API');
+      assert.ok(vm.cards.estimatedCost.subtitle?.includes('não representa gasto real'));
+    }
   });
 
   it('preserves null monetary chart points and maps breakdown labels', () => {
