@@ -139,6 +139,74 @@ def test_grouped_analytics_respect_active_filters(tmp_path):
     assert missing.by_tool() == []
 
 
+def test_comparison_uses_previous_equivalent_period(tmp_path):
+    db, repo, _ = populated(tmp_path)
+
+    with db.connect() as conn:
+        source_id = conn.execute("SELECT id FROM sources WHERE name='codex'").fetchone()[0]
+        project_id = conn.execute("SELECT id FROM projects WHERE name='demo'").fetchone()[0]
+        model_id = conn.execute("SELECT id FROM models WHERE name='gpt-5.6-terra'").fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO sessions(
+                source_id, external_session_id, project_id, started_at, provider, model_id
+            ) VALUES(?, 'previous-session', ?, '2026-08-17T12:00:00Z', 'headroom', ?)
+            """,
+            (source_id, project_id, model_id),
+        )
+        previous_session_id = conn.execute(
+            "SELECT id FROM sessions WHERE external_session_id='previous-session'"
+        ).fetchone()[0]
+        current_session_id = conn.execute(
+            "SELECT id FROM sessions WHERE external_session_id='session-1'"
+        ).fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO token_usage(
+                session_id, timestamp, model_id, input_tokens, cached_input_tokens,
+                output_tokens, total_tokens, event_key
+            ) VALUES(?, '2026-08-17T12:05:00Z', ?, 9000, 8000, 100, 9100, 'previous-token')
+            """,
+            (previous_session_id, model_id),
+        )
+        conn.execute(
+            """
+            INSERT INTO costs(
+                session_id, period_start, observed_cost_usd, total_savings_usd, event_key
+            ) VALUES(?, '2026-08-17T00:00:00Z', 0.04, 0.01, 'previous-cost')
+            """,
+            (previous_session_id,),
+        )
+        conn.execute(
+            """
+            INSERT INTO costs(
+                session_id, period_start, observed_cost_usd, total_savings_usd, event_key
+            ) VALUES(?, '2026-08-18T00:00:00Z', 0.08, 0.02, 'current-cost')
+            """,
+            (current_session_id,),
+        )
+
+    analytics = AnalyticsService(
+        repo,
+        AnalyticsFilter(from_date=date(2026, 8, 18), to_date=date(2026, 8, 18)),
+    )
+    comparison = analytics.comparison()
+
+    assert comparison is not None
+    assert comparison["sessions_pct"] == 0.0
+    assert comparison["total_tokens_pct"] is not None
+    assert comparison["total_tokens_pct"] > 90.0
+    assert comparison["cache_ratio_pp"] > 0.0
+    assert comparison["observed_cost_usd_pct"] == 100.0
+    assert comparison["total_savings_usd_pct"] == 100.0
+
+
+def test_comparison_is_unavailable_without_bounded_period(tmp_path):
+    _, repo, _ = populated(tmp_path)
+
+    assert AnalyticsService(repo).comparison() is None
+
+
 def test_headroom_lifetime_cost_snapshot_is_replaced_not_accumulated(tmp_path):
     codex_home = tmp_path / ".codex"
     sdir = codex_home / "sessions" / "2026" / "08" / "18"
