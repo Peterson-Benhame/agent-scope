@@ -15,6 +15,7 @@ dev = ["pytest>=8"]
 
 [project.scripts]
 agentscope = "agentscope.cli:app"
+agentscope-codex-origin = "agentscope.diagnostics.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]
