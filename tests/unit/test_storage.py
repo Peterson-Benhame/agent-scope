@@ -1,6 +1,12 @@
 import sqlite3
 
-from agentscope.domain.models import NormalizedMessage, NormalizedSession
+from agentscope.domain.models import (
+    IdentityConfidence,
+    NormalizedMachine,
+    NormalizedMessage,
+    NormalizedSession,
+    NormalizedUser,
+)
 from agentscope.storage.database import Database
 from agentscope.storage.repository import Repository
 
@@ -109,6 +115,78 @@ def test_upsert_session_is_idempotent(tmp_path):
     assert first == second
     with db.connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
+
+
+def test_identity_upserts_use_stable_keys_not_display_labels(tmp_path):
+    db = Database(tmp_path / "agentscope.db")
+    db.initialize()
+    repo = Repository(db)
+
+    first_user = repo.upsert_user(
+        NormalizedUser(
+            stable_key="user-1",
+            display_name="Peterson",
+            provider="local",
+            confidence=IdentityConfidence.INFERRED,
+        )
+    )
+    second_user = repo.upsert_user(
+        NormalizedUser(
+            stable_key="user-1",
+            display_name="Peterson Benhame",
+            provider="local",
+            confidence=IdentityConfidence.INFERRED,
+        )
+    )
+    another_user = repo.upsert_user(
+        NormalizedUser(
+            stable_key="user-2",
+            display_name="Peterson Benhame",
+            confidence=IdentityConfidence.UNKNOWN,
+        )
+    )
+
+    first_machine = repo.upsert_machine(
+        NormalizedMachine(stable_key="machine-1", display_name="Notebook")
+    )
+    second_machine = repo.upsert_machine(
+        NormalizedMachine(stable_key="machine-1", display_name="Notebook novo")
+    )
+
+    assert first_user == second_user
+    assert another_user != first_user
+    assert first_machine == second_machine
+
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 2
+        assert conn.execute("SELECT COUNT(*) FROM machines").fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT display_name FROM users WHERE stable_key='user-1'"
+        ).fetchone()[0] == "Peterson Benhame"
+        assert conn.execute(
+            "SELECT display_name FROM machines WHERE stable_key='machine-1'"
+        ).fetchone()[0] == "Notebook novo"
+
+
+def test_session_can_be_associated_with_user_and_machine(tmp_path):
+    db = Database(tmp_path / "agentscope.db")
+    db.initialize()
+    repo = Repository(db)
+    session_id = repo.upsert_session(
+        NormalizedSession(external_session_id="s1", source="codex")
+    )
+    user_id = repo.upsert_user(NormalizedUser(stable_key="user-1"))
+    machine_id = repo.upsert_machine(NormalizedMachine(stable_key="machine-1"))
+
+    repo.associate_session_identity(session_id, user_id, machine_id)
+
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT user_id, machine_id FROM sessions WHERE id=?",
+            (session_id,),
+        ).fetchone()
+    assert row[0] == user_id
+    assert row[1] == machine_id
 
 
 def test_message_provenance_prevents_duplicate_event(tmp_path):
