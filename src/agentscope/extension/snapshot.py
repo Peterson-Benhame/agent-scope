@@ -56,14 +56,19 @@ def _identity_confidence(repository: Repository) -> dict[str, int]:
     return {str(row["identity_confidence"]): int(row["n"]) for row in rows}
 
 
-def _tokens_without_model(repository: Repository, filters: AnalyticsFilter) -> int:
-    clauses: list[str] = ["COALESCE(tu.model_id, s.model_id) IS NULL"]
+def _scope_clauses(
+    filters: AnalyticsFilter,
+    *,
+    date_expression: str,
+    model_expression: str,
+) -> tuple[list[str], list[object]]:
+    clauses: list[str] = []
     params: list[object] = []
     if filters.from_date is not None:
-        clauses.append("substr(tu.timestamp, 1, 10) >= ?")
+        clauses.append(f"substr({date_expression}, 1, 10) >= ?")
         params.append(filters.from_date.isoformat())
     if filters.to_date is not None:
-        clauses.append("substr(tu.timestamp, 1, 10) <= ?")
+        clauses.append(f"substr({date_expression}, 1, 10) <= ?")
         params.append(filters.to_date.isoformat())
     if filters.project is not None:
         clauses.append("p.name = ?")
@@ -78,8 +83,18 @@ def _tokens_without_model(repository: Repository, filters: AnalyticsFilter) -> i
         clauses.append("COALESCE(mc.display_name, mc.stable_key) = ?")
         params.append(filters.machine)
     if filters.model is not None:
-        clauses.append("COALESCE(tm.name, sm.name) = ?")
+        clauses.append(f"{model_expression} = ?")
         params.append(filters.model)
+    return clauses, params
+
+
+def _tokens_without_model(repository: Repository, filters: AnalyticsFilter) -> int:
+    clauses, params = _scope_clauses(
+        filters,
+        date_expression="tu.timestamp",
+        model_expression="COALESCE(tm.name, sm.name)",
+    )
+    clauses.insert(0, "COALESCE(tu.model_id, s.model_id) IS NULL")
 
     with repository.database.connect() as conn:
         row = conn.execute(
@@ -99,6 +114,64 @@ def _tokens_without_model(repository: Repository, filters: AnalyticsFilter) -> i
     return int(row["n"])
 
 
+def _has_savings_evidence(repository: Repository, filters: AnalyticsFilter) -> bool:
+    cost_clauses, cost_params = _scope_clauses(
+        filters,
+        date_expression="c.period_start",
+        model_expression="COALESCE(cm.name, sm.name)",
+    )
+    cost_clauses.insert(
+        0,
+        "(c.compression_savings_usd IS NOT NULL "
+        "OR c.cache_savings_usd IS NOT NULL "
+        "OR c.total_savings_usd IS NOT NULL)",
+    )
+
+    optimization_clauses, optimization_params = _scope_clauses(
+        filters,
+        date_expression="op.timestamp",
+        model_expression="COALESCE(om.name, sm.name)",
+    )
+    optimization_clauses.insert(
+        0,
+        "(op.compression_savings_usd IS NOT NULL OR op.cache_savings_usd IS NOT NULL)",
+    )
+
+    with repository.database.connect() as conn:
+        cost_row = conn.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM costs c
+            LEFT JOIN sessions s ON s.id=c.session_id
+            LEFT JOIN projects p ON p.id=s.project_id
+            LEFT JOIN models cm ON cm.id=c.model_id
+            LEFT JOIN models sm ON sm.id=s.model_id
+            LEFT JOIN sources src ON src.id=s.source_id
+            LEFT JOIN users u ON u.id=s.user_id
+            LEFT JOIN machines mc ON mc.id=s.machine_id
+            WHERE """ + " AND ".join(cost_clauses),
+            cost_params,
+        ).fetchone()
+        if int(cost_row["n"]) > 0:
+            return True
+
+        optimization_row = conn.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM optimizations op
+            LEFT JOIN sessions s ON s.id=op.session_id
+            LEFT JOIN projects p ON p.id=s.project_id
+            LEFT JOIN models om ON om.id=op.model_id
+            LEFT JOIN models sm ON sm.id=s.model_id
+            LEFT JOIN sources src ON src.id=s.source_id
+            LEFT JOIN users u ON u.id=s.user_id
+            LEFT JOIN machines mc ON mc.id=s.machine_id
+            WHERE """ + " AND ".join(optimization_clauses),
+            optimization_params,
+        ).fetchone()
+    return int(optimization_row["n"]) > 0
+
+
 def build_extension_snapshot(
     repository: Repository,
     filters: AnalyticsFilter,
@@ -112,6 +185,7 @@ def build_extension_snapshot(
     optimization_confidence = quality.get("optimization_confidence", {})
     if not isinstance(optimization_confidence, dict):
         optimization_confidence = {}
+    savings = summary.total_savings_usd if _has_savings_evidence(repository, filters) else None
 
     return {
         "schema": SNAPSHOT_SCHEMA,
@@ -135,7 +209,7 @@ def build_extension_snapshot(
                 tokens_saved=summary.tokens_saved,
                 cache_ratio=summary.cache_ratio if summary.input_tokens else None,
                 observed_cost_usd=summary.observed_cost_usd,
-                estimated_savings_usd=summary.total_savings_usd,
+                estimated_savings_usd=savings,
             )
         ),
         "dimensions": to_dict(_dimensions(repository)),
