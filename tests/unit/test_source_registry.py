@@ -1,7 +1,6 @@
-from pathlib import Path
-
 import pytest
 
+from agentscope.importer import default_source_registry
 from agentscope.sources.base import DiscoveryContext, SourceCapabilities, SourceDiscovery
 from agentscope.sources.registry import SourceRegistry
 
@@ -37,6 +36,19 @@ def test_registry_preserves_adapter_registration_order(tmp_path):
 
     assert [item.source for item in discoveries] == ["codex", "headroom"]
     assert calls == ["codex", "headroom"]
+
+
+def test_default_registry_contains_all_v2_sources_in_stable_order():
+    registry = default_source_registry()
+
+    assert [adapter.source_name for adapter in registry.adapters] == [
+        "codex",
+        "headroom",
+        "claude_code",
+        "github_copilot",
+        "kimi",
+        "gemini",
+    ]
 
 
 def test_disabled_adapter_is_not_discovered(tmp_path):
