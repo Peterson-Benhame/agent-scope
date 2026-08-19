@@ -12,8 +12,12 @@ from agentscope.sources.base import (
     SourceCollectionSummary,
     SourceDiscovery,
 )
+from agentscope.sources.claude_code import ClaudeCodeAdapter
 from agentscope.sources.codex import CodexAdapter
+from agentscope.sources.gemini import GeminiAdapter
+from agentscope.sources.github_copilot import GitHubCopilotAdapter
 from agentscope.sources.headroom import HeadroomAdapter
+from agentscope.sources.kimi import KimiAdapter
 from agentscope.sources.registry import SourceRegistry
 from agentscope.storage.repository import Repository
 
@@ -39,7 +43,16 @@ def _emit(progress: ProgressCallback | None, event: ProgressEvent) -> None:
 
 
 def default_source_registry() -> SourceRegistry:
-    return SourceRegistry([CodexAdapter(), HeadroomAdapter()])
+    return SourceRegistry(
+        [
+            CodexAdapter(),
+            HeadroomAdapter(),
+            ClaudeCodeAdapter(),
+            GitHubCopilotAdapter(),
+            KimiAdapter(),
+            GeminiAdapter(),
+        ]
+    )
 
 
 def discovery_context(config: AgentScopeConfig) -> DiscoveryContext:
@@ -48,6 +61,10 @@ def discovery_context(config: AgentScopeConfig) -> DiscoveryContext:
         overrides={
             "codex": config.codex_home,
             "headroom": config.headroom_home,
+            "claude_code": config.claude_home,
+            "github_copilot": config.copilot_home,
+            "kimi": config.kimi_home,
+            "gemini": config.gemini_home,
         },
     )
 
