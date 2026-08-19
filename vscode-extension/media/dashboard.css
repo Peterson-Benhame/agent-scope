@@ -1,6 +1,10 @@
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
-  padding: 12px;
+  padding: clamp(12px, 2vw, 24px);
   color: var(--vscode-editor-foreground);
   background: var(--vscode-editor-background);
   font-family: var(--vscode-font-family);
@@ -10,21 +14,34 @@ body {
 button,
 select,
 input {
+  min-height: 32px;
   color: var(--vscode-input-foreground);
   background: var(--vscode-input-background);
-  border: 1px solid var(--vscode-input-border, transparent);
-  border-radius: 3px;
-  padding: 6px 8px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: 6px;
+  padding: 6px 9px;
   font: inherit;
 }
 
 button {
   cursor: pointer;
+  background: var(--vscode-button-secondaryBackground, var(--vscode-input-background));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-input-foreground));
+}
+
+button.primary,
+button.active {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border-color: var(--vscode-button-background);
 }
 
 button:hover,
-button.active {
+button:focus-visible,
+select:focus-visible,
+input:focus-visible {
   outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
 }
 
 .toolbar,
@@ -38,13 +55,45 @@ button.active {
 
 .toolbar {
   justify-content: space-between;
-  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.brand {
+  display: grid;
+  gap: 3px;
+}
+
+.brand strong {
+  font-size: 1.25rem;
+}
+
+.brand span,
+.filter-field span,
+.card-label,
+.card-subtitle,
+.status,
+.chart-empty,
+.notes {
+  color: var(--vscode-descriptionForeground);
+}
+
+.brand span,
+.card-subtitle,
+.chart-empty,
+.notes {
+  font-size: 0.9em;
 }
 
 .filters {
   display: grid;
   gap: 10px;
+  padding: 12px;
   margin-bottom: 12px;
+  border: 1px solid var(--vscode-panel-border, var(--vscode-input-border));
+  border-radius: 10px;
+  background: var(--vscode-sideBarSectionHeader-background);
 }
 
 .period-row,
@@ -52,49 +101,234 @@ button.active {
   flex-wrap: wrap;
 }
 
-.dimension-grid {
+.dimension-grid,
+.cards,
+.chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 8px;
+  gap: 12px;
+}
+
+.dimension-grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
 
 .filter-field {
   display: grid;
-  gap: 4px;
+  gap: 5px;
+  min-width: 0;
 }
 
-.filter-field span {
-  color: var(--vscode-descriptionForeground);
-  font-size: 0.9em;
+.filter-field select {
+  width: 100%;
+  min-width: 0;
 }
 
 .status {
-  color: var(--vscode-descriptionForeground);
+  min-height: 20px;
   margin: 10px 0 12px;
   word-break: break-word;
 }
 
 .cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.card,
+.chart-card,
+.notes {
+  border: 1px solid var(--vscode-panel-border, var(--vscode-input-border));
+  border-radius: 10px;
+  background: var(--vscode-sideBarSectionHeader-background);
 }
 
 .card {
   display: grid;
+  align-content: start;
   gap: 8px;
-  min-height: 72px;
-  padding: 12px;
-  border: 1px solid var(--vscode-panel-border, var(--vscode-input-border));
-  border-radius: 5px;
-  background: var(--vscode-sideBarSectionHeader-background);
-}
-
-.card-label {
-  color: var(--vscode-descriptionForeground);
+  min-height: 100px;
+  padding: 14px;
 }
 
 .card-value {
-  font-size: 1.25em;
+  font-size: clamp(1.2rem, 3vw, 1.55rem);
+  line-height: 1.15;
   overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.card-subtitle {
+  line-height: 1.35;
+}
+
+.chart-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  margin-top: 16px;
+}
+
+.chart-card {
+  min-width: 0;
+  padding: 14px;
+  overflow: hidden;
+}
+
+.chart-card h3 {
+  margin: 0 0 12px;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.chart-svg {
+  display: block;
+  width: 100%;
+  min-height: 150px;
+  max-height: 240px;
+}
+
+.chart-axis {
+  stroke: var(--vscode-panel-border, var(--vscode-descriptionForeground));
+  stroke-width: 1;
+}
+
+.chart-line {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chart-point {
+  stroke-width: 1;
+}
+
+.chart-line.series-1,
+.chart-point.series-1 {
+  stroke: var(--vscode-charts-blue, var(--vscode-focusBorder));
+  fill: var(--vscode-charts-blue, var(--vscode-focusBorder));
+}
+
+.chart-line.series-2,
+.chart-point.series-2 {
+  stroke: var(--vscode-charts-green, var(--vscode-testing-iconPassed));
+  fill: var(--vscode-charts-green, var(--vscode-testing-iconPassed));
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.85em;
+}
+
+.legend-item::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--vscode-focusBorder);
+}
+
+.legend-item.series-2::before {
+  background: var(--vscode-charts-green, var(--vscode-testing-iconPassed));
+}
+
+.breakdown-list {
+  display: grid;
+  gap: 12px;
+}
+
+.breakdown-row {
+  display: grid;
+  gap: 5px;
+}
+
+.breakdown-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  font-size: 0.88em;
+}
+
+.breakdown-header span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breakdown-header strong {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.bar-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--vscode-progressBar-background, var(--vscode-panel-border));
+  opacity: 0.7;
+}
+
+.bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--vscode-focusBorder);
+  opacity: 1;
+}
+
+.notes {
+  display: grid;
+  gap: 5px;
+  margin-top: 16px;
+  padding: 12px 14px;
+}
+
+.notes:empty {
+  display: none;
+}
+
+.notes p {
+  margin: 0;
+}
+
+@media (max-width: 700px) {
+  .cards {
+    grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  body {
+    padding: 10px;
+  }
+
+  .toolbar-actions,
+  .period-row,
+  .date-row {
+    width: 100%;
+  }
+
+  .toolbar-actions button,
+  .period-row button {
+    flex: 1 1 auto;
+  }
+
+  .date-row > input,
+  .date-row > button {
+    flex: 1 1 100%;
+  }
+
+  .cards,
+  .chart-grid,
+  .dimension-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .card {
+    min-height: 88px;
+  }
 }
