@@ -20,6 +20,14 @@ class SnapshotSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class SnapshotBilling:
+    mode: str
+    confidence: str
+    estimated_cost_basis: str
+    is_observed_spend: bool
+
+
+@dataclass(frozen=True, slots=True)
 class SnapshotDimensions:
     projects: list[str]
     models: list[str]
