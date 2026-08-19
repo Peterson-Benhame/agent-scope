@@ -58,6 +58,7 @@ class SourceCollectionSummary:
     sessions_imported: int = 0
     optimizations_imported: int = 0
     errors: int = 0
+    diagnostics: tuple[str, ...] = ()
 
     def __add__(self, other: "SourceCollectionSummary") -> "SourceCollectionSummary":
         return SourceCollectionSummary(
@@ -69,6 +70,7 @@ class SourceCollectionSummary:
                 self.optimizations_imported + other.optimizations_imported
             ),
             errors=self.errors + other.errors,
+            diagnostics=self.diagnostics + other.diagnostics,
         )
 
 
