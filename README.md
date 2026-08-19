@@ -2,16 +2,16 @@
 
 AgentScope is a local-first observability and analytics tool for agent execution histories.
 
-The current implementation ingests OpenAI Codex session history and Headroom optimization metrics, normalizes them into SQLite, and produces safe CSV, JSON, and HTML analytics. Source collection is provider-neutral through a `SourceAdapter` registry so additional agent runtimes, tools, and optimizers can be added without redefining the analytics layer.
+The current implementation ingests local histories from multiple AI development tools, normalizes them into SQLite, and produces safe CSV, JSON, and HTML analytics. Source collection is provider-neutral through a `SourceAdapter` registry so additional agent runtimes, tools, and optimizers can be added without redefining the analytics layer.
 
 ## What it analyzes
 
 - sessions and projects;
-- models and token usage;
-- cached input usage;
+- models and token usage when exposed by the source;
+- cached input usage when exposed by the source;
 - agents and subagents when explicit evidence exists;
 - skill availability, loading, and invocation as separate states;
-- tool and MCP calls;
+- tool and MCP calls when exposed by the source;
 - Headroom compression and cache savings;
 - source-reported and estimated costs without presenting estimates as billing facts;
 - trends by day, project, model, user, and machine;
@@ -25,7 +25,7 @@ AgentScope is local-first and treats provider source files as read-only.
 
 Safe metadata reporting is the default. Standard reports and exports do not include complete prompt bodies, assistant messages, tool inputs, or tool outputs. Full message export requires the explicit `--full-content` option.
 
-The local SQLite database can contain message content imported from source histories. Treat `data/agentscope.db` as sensitive data.
+The local SQLite database can contain message content imported from supported source histories. Treat `data/agentscope.db` as sensitive data.
 
 ## Requirements
 
@@ -39,44 +39,66 @@ python -m venv .venv
 python -m pip install -e ".[dev]"
 ```
 
-## Default sources on Windows
+## Default source roots on Windows
 
 ```text
-%USERPROFILE%\.codex\sessions\**\rollout-*.jsonl
-%USERPROFILE%\.codex\session_index.jsonl
-%USERPROFILE%\.codex\attachments\**
-%USERPROFILE%\.headroom\proxy_savings.json
-%USERPROFILE%\.headroom\*.jsonl
+%USERPROFILE%\.codex\
+%USERPROFILE%\.headroom\
+%USERPROFILE%\.claude\
+%USERPROFILE%\.copilot\
+%USERPROFILE%\.kimi-code\
+%USERPROFILE%\.gemini\
 ```
 
 AgentScope never modifies these source files.
 
 ### Source adapters
 
-`agentscope collect` discovers enabled source adapters before collection. The current implemented adapters are:
+`agentscope collect` discovers enabled source adapters before collection. The registered V2 adapters are:
 
 - `codex` — sessions, messages, tokens/cache, tools, agents and skills when explicit evidence exists;
-- `headroom` — optimizer events, cache metrics and source-reported cost/savings data.
+- `headroom` — optimizer events, cache metrics and source-reported cost/savings data;
+- `claude_code` — verified JSONL sessions/messages/model/tokens/cache/tools;
+- `github_copilot` — verified Copilot CLI session-state events with sessions/messages/model/tokens/cache/tools;
+- `kimi` — documented session index + state metadata only in this version;
+- `gemini` — current JSONL conversation sessions/messages/model/tokens/cache/tools.
+
+Provider-specific details and limitations are documented in [`docs/provider-support.md`](docs/provider-support.md).
 
 All registered sources are enabled by default. To restrict collection, set the comma-separated `AGENTSCOPE_SOURCES` environment variable:
 
 ```powershell
-$env:AGENTSCOPE_SOURCES = "codex"
+$env:AGENTSCOPE_SOURCES = "codex,claude_code,github_copilot"
 agentscope collect
 ```
 
-Or enable both current sources explicitly:
+Supported source names are:
 
-```powershell
-$env:AGENTSCOPE_SOURCES = "codex,headroom"
-agentscope collect
+```text
+codex
+headroom
+claude_code
+github_copilot
+kimi
+gemini
 ```
 
-A disabled adapter is not discovered or collected. `agentscope status` reports whether each enabled source was detected and how many supported artifacts were found.
+A disabled adapter is not discovered or collected. `agentscope status` reports whether each enabled source was detected, how many supported artifacts were found and any unsupported-format diagnostic.
+
+Provider root overrides are available through:
+
+```text
+AGENTSCOPE_CODEX_HOME
+AGENTSCOPE_HEADROOM_HOME
+AGENTSCOPE_CLAUDE_HOME
+AGENTSCOPE_COPILOT_HOME
+AGENTSCOPE_KIMI_HOME
+AGENTSCOPE_GEMINI_HOME
+```
 
 ### User and machine identity
 
-AgentScope keeps the human user and the machine as separate dimensions. Local collection creates stable hashed keys from local OS identity signals and records the local user with confidence `inferred`; provider adapters may later supply an `exact` provider user identity when the provider exposes one safely.
+AgentScope keeps the human user and the machine as separate dimensions. Local collection creates stable hashed keys from local OS identity signals and records the local user with confidence `inferred`; a provider identity may later be recorded as `exact` only when the provider exposes explicit safe evidence.
 
 Display names are labels only and never uniqueness keys. They can be customized without changing stable identity:
 
@@ -96,7 +118,7 @@ Collect new or changed local data:
 agentscope collect
 ```
 
-During collection, AgentScope reports detected sources and shows an overall progress bar until it reaches 100%.
+During collection, AgentScope reports detected sources and shows an overall progress bar until it reaches 100%. Unsupported local formats are reported as diagnostics instead of being guessed.
 
 Inspect source and database status:
 
@@ -174,7 +196,7 @@ agentscope export --full-content
 
 When filters are used with `--full-content`, the full-message export obeys the same selected filters.
 
-Custom source/database paths are supported:
+Custom Codex/Headroom paths remain available as CLI options:
 
 ```powershell
 agentscope collect `
@@ -182,6 +204,8 @@ agentscope collect `
   --headroom-home "C:\Users\me\.headroom" `
   --database "D:\AgentScope\agentscope.db"
 ```
+
+Use the environment overrides above for the additional provider roots.
 
 ## Output
 
@@ -216,14 +240,14 @@ reports/
 AgentScope deliberately separates different monetary concepts:
 
 - **Estimated raw cost** — theoretical cost from a known pricing table, when configured and supported;
-- **Observed/source-reported cost** — value explicitly present in an imported source;
+- **Observed/source-reported cost** — value explicitly present in an imported source as an applicable monetary value;
 - **Compression savings** — savings reported or derived from optimizer compression data;
 - **Cache savings** — savings reported by cache-aware optimizer data;
 - **Total savings** — aggregate of known savings categories.
 
 Unknown cost is stored as `NULL`, never as zero.
 
-Headroom cost/savings fields are labeled as source-reported optimizer metrics. They are not automatically treated as the final amount charged by OpenAI or another provider.
+Headroom cost/savings fields are labeled as source-reported optimizer metrics. They are not automatically treated as the final amount charged by OpenAI or another provider. Non-USD provider credits/multipliers are not written as USD cost.
 
 ## Data confidence
 
@@ -256,7 +280,7 @@ Run the full test suite:
 python -m pytest -q
 ```
 
-The test fixtures are synthetic and sanitized. Personal Codex histories are not committed.
+The test fixtures are synthetic and sanitized. Personal provider histories are not committed.
 
 ## Project documentation
 
@@ -267,6 +291,7 @@ The V2 multi-source/team design and ordered implementation plans are in:
 ```text
 docs/superpowers/specs/2026-08-18-multi-source-team-analytics-design.md
 docs/superpowers/plans/2026-08-18-agentscope-v2-roadmap.md
+docs/provider-support.md
 ```
 
 ## Current boundaries
@@ -281,4 +306,4 @@ AgentScope remains analytics-only. It does not:
 - provide a central team server;
 - provide a VS Code extension yet.
 
-The approved V2 roadmap adds more provider adapters and offline sanitized team export/import before any central server is considered.
+The approved V2 roadmap adds offline sanitized team export/import before any central server is considered.
