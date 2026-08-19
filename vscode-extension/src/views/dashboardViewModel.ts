@@ -39,6 +39,7 @@ export interface DashboardBreakdownPoint {
 export interface DashboardViewModel {
   generatedAt: string;
   database: string;
+  lastImportedLabel: string;
   filters: SnapshotFilters;
   isEmpty: boolean;
   cards: DashboardCards;
@@ -78,6 +79,22 @@ function formatUsd(value: number | null): string {
   }).format(value)}`;
 }
 
+function lastImportedLabel(snapshot: ExtensionSnapshot): string {
+  const freshness = snapshot.freshness;
+  if (!freshness?.last_imported_at) return 'Última coleta: não disponível';
+  const raw = freshness.last_imported_at;
+  const normalized = raw.includes('T') ? raw : `${raw.replace(' ', 'T')}Z`;
+  const parsed = new Date(normalized);
+  const formatted = Number.isNaN(parsed.getTime())
+    ? raw
+    : new Intl.DateTimeFormat('pt-BR', {
+        dateStyle: 'short',
+        timeStyle: 'short',
+      }).format(parsed);
+  const artifactLabel = freshness.artifacts_tracked === 1 ? 'arquivo' : 'arquivos';
+  return `Última coleta: ${formatted} · ${freshness.artifacts_tracked} ${artifactLabel}`;
+}
+
 function metric(
   value: string,
   availability?: AvailabilityItem,
@@ -96,6 +113,7 @@ export function toDashboardViewModel(
   return {
     generatedAt: snapshot.generated_at,
     database: snapshot.database,
+    lastImportedLabel: lastImportedLabel(snapshot),
     filters,
     isEmpty: snapshot.summary.sessions === 0,
     cards: {
