@@ -6,6 +6,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from agentscope.cli import app
+from agentscope.diagnostics.cli import app as diagnostics_app
 
 
 runner = CliRunner()
@@ -171,10 +172,8 @@ def test_codex_origin_diagnostics_cli_reports_fixture_as_vscode(tmp_path):
     assert collected.exit_code == 0, collected.output
 
     result = runner.invoke(
-        app,
+        diagnostics_app,
         [
-            "diagnostics",
-            "codex-origin",
             "--json",
             "--database",
             str(db),
