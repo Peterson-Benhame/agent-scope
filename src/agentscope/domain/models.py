@@ -18,6 +18,30 @@ class CorrelationConfidence(str, Enum):
     UNKNOWN = "unknown"
 
 
+class IdentityConfidence(str, Enum):
+    EXACT = "exact"
+    INFERRED = "inferred"
+    UNKNOWN = "unknown"
+
+
+@dataclass(slots=True)
+class NormalizedUser:
+    stable_key: str
+    display_name: str | None = None
+    provider_user_id: str | None = None
+    provider: str | None = None
+    confidence: IdentityConfidence = IdentityConfidence.UNKNOWN
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class NormalizedMachine:
+    stable_key: str
+    display_name: str | None = None
+    os: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass(slots=True)
 class NormalizedSession:
     external_session_id: str
