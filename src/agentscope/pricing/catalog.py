@@ -15,6 +15,12 @@ _MODEL_PAGE_URLS = {
     "gpt-5.6-terra": "https://developers.openai.com/api/docs/models/gpt-5.6-terra.md",
     "gpt-5.6-luna": "https://developers.openai.com/api/docs/models/gpt-5.6-luna.md",
 }
+_LAUNCH_SOURCE_URL = "https://openai.com/index/gpt-5-6/"
+_REDUCED_SOURCE_URL = (
+    "https://openai.com/index/advancing-the-price-performance-frontier-with-gpt-5-6/"
+)
+_LAUNCH_VERSION = "openai-gpt-5.6-launch-2026-07-09"
+_REDUCED_VERSION = "openai-gpt-5.6-price-reduction-2026-07-30"
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +206,120 @@ class PricingCatalog:
 def _source_hash(model: str) -> str:
     raw = f"{_MODEL_PAGE_URLS[model]}|{_SOURCE_VERSION}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _provenance_hash(source_url: str, source_version: str) -> str:
+    return hashlib.sha256(f"{source_url}|{source_version}".encode("utf-8")).hexdigest()
+
+
+def _context_rows(
+    model: str,
+    input_price: float,
+    cached_price: float,
+    output_price: float,
+) -> tuple[tuple[str, str, float, float, float, float], ...]:
+    cache_write = input_price * 1.25
+    return (
+        (model, "short", input_price, cached_price, cache_write, output_price),
+        (
+            model,
+            "long",
+            input_price * 2.0,
+            cached_price * 2.0,
+            cache_write * 2.0,
+            output_price * 1.5,
+        ),
+    )
+
+
+def _install_history_rows(
+    repository: Repository,
+    *,
+    rows: tuple[tuple[str, str, float, float, float, float], ...],
+    valid_from: date,
+    valid_to: date | None,
+    source_url: str,
+    source_version: str,
+) -> int:
+    catalog = PricingCatalog(repository)
+    source_hash = _provenance_hash(source_url, source_version)
+    inserted = 0
+    for model, context_type, input_price, cached_price, cache_write, output_price in rows:
+        if catalog.add_price(
+            provider="openai",
+            model=model,
+            pricing_scope=OPENAI_API_STANDARD_SCOPE,
+            service_tier="standard",
+            context_type=context_type,
+            input_per_1m_usd=input_price,
+            cached_input_per_1m_usd=cached_price,
+            cache_write_per_1m_usd=cache_write,
+            output_per_1m_usd=output_price,
+            valid_from=valid_from,
+            valid_to=valid_to,
+            valid_from_basis="provider_declared",
+            source_url=source_url,
+            source_version=source_version,
+            source_hash=source_hash,
+        ):
+            inserted += 1
+    return inserted
+
+
+def install_official_openai_history(repository: Repository) -> int:
+    """Install provider-declared GPT-5.6 API prices with their effective dates."""
+    launch_rows = (
+        *_context_rows("gpt-5.6-sol", 5.0, 0.50, 30.0),
+        *_context_rows("gpt-5.6-terra", 2.50, 0.25, 15.0),
+        *_context_rows("gpt-5.6-luna", 1.0, 0.10, 6.0),
+    )
+    reduced_rows = (
+        *_context_rows("gpt-5.6-terra", 2.0, 0.20, 12.0),
+        *_context_rows("gpt-5.6-luna", 0.20, 0.02, 1.20),
+    )
+    inserted = _install_history_rows(
+        repository,
+        rows=launch_rows,
+        valid_from=date(2026, 7, 9),
+        valid_to=date(2026, 7, 29),
+        source_url=_LAUNCH_SOURCE_URL,
+        source_version=_LAUNCH_VERSION,
+    )
+    inserted += _install_history_rows(
+        repository,
+        rows=reduced_rows,
+        valid_from=date(2026, 7, 30),
+        valid_to=None,
+        source_url=_REDUCED_SOURCE_URL,
+        source_version=_REDUCED_VERSION,
+    )
+    # Sol remained unchanged after July 30; keep its launch record open-ended.
+    catalog = PricingCatalog(repository)
+    sol_hash = _provenance_hash(_LAUNCH_SOURCE_URL, _LAUNCH_VERSION)
+    for model, context_type, input_price, cached_price, cache_write, output_price in _context_rows(
+        "gpt-5.6-sol", 5.0, 0.50, 30.0
+    ):
+        # The launch rows above end on July 29 so Terra/Luna can switch cleanly.
+        # Add an open-ended Sol record from launch because its price did not change.
+        if catalog.add_price(
+            provider="openai",
+            model=model,
+            pricing_scope=OPENAI_API_STANDARD_SCOPE,
+            service_tier="standard",
+            context_type=context_type,
+            input_per_1m_usd=input_price,
+            cached_input_per_1m_usd=cached_price,
+            cache_write_per_1m_usd=cache_write,
+            output_per_1m_usd=output_price,
+            valid_from=date(2026, 7, 9),
+            valid_to=None,
+            valid_from_basis="provider_declared",
+            source_url=_LAUNCH_SOURCE_URL,
+            source_version=_LAUNCH_VERSION,
+            source_hash=sol_hash,
+        ):
+            inserted += 1
+    return inserted
 
 
 def install_builtin_openai_catalog(repository: Repository) -> int:
