@@ -132,9 +132,13 @@
     }
     if (message.type === 'snapshot') {
       const vm = message.payload;
-      status.textContent = vm.database
-        ? `Banco: ${vm.database}`
-        : 'Banco padrão do AgentScope';
+      if (vm.isEmpty) {
+        status.textContent = 'Nenhum dado encontrado para os filtros selecionados.';
+      } else {
+        status.textContent = vm.database
+          ? `Banco: ${vm.database}`
+          : 'Banco padrão do AgentScope';
+      }
       renderFilters(vm);
       renderCards(vm);
     }
