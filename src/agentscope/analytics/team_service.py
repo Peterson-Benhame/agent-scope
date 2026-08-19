@@ -360,6 +360,18 @@ class TeamAnalyticsService:
             model_expression="sm.name",
         )
         token_where, token_params = self._where(date_expression="tu.timestamp")
+        cache_where, cache_params = self._where(
+            date_expression="tu.timestamp",
+            required=["tu.cached_input_tokens IS NOT NULL"],
+        )
+        cost_where, cost_params = self._where(
+            date_expression="COALESCE(c.period_start, s.started_at)",
+            model_expression="COALESCE(cm.name, sm.name)",
+            required=[
+                "(c.observed_cost_usd IS NOT NULL "
+                "OR c.estimated_raw_cost_usd IS NOT NULL)"
+            ],
+        )
         optimization_where, optimization_params = self._where(
             date_expression="op.timestamp",
             model_expression="COALESCE(om.name, sm.name)",
@@ -406,44 +418,62 @@ class TeamAnalyticsService:
                 """ + token_where,
                 token_params,
             ).fetchone()
-            coverage_rows = conn.execute(
+            session_pairs = conn.execute(
                 """
-                SELECT src.name AS source,
-                       COUNT(DISTINCT s.id) AS sessions,
-                       CASE WHEN EXISTS(
-                           SELECT 1
-                           FROM token_usage tx
-                           JOIN sessions sx ON sx.id=tx.session_id
-                           WHERE sx.source_id=src.id
-                       ) THEN 1 ELSE 0 END AS has_tokens,
-                       CASE WHEN EXISTS(
-                           SELECT 1
-                           FROM token_usage tx
-                           JOIN sessions sx ON sx.id=tx.session_id
-                           WHERE sx.source_id=src.id
-                             AND tx.cached_input_tokens IS NOT NULL
-                       ) THEN 1 ELSE 0 END AS has_cache,
-                       CASE WHEN EXISTS(
-                           SELECT 1
-                           FROM costs cx
-                           JOIN sessions sx ON sx.id=cx.session_id
-                           WHERE sx.source_id=src.id
-                             AND (
-                                 cx.observed_cost_usd IS NOT NULL
-                                 OR cx.estimated_raw_cost_usd IS NOT NULL
-                             )
-                       ) THEN 1 ELSE 0 END AS has_cost
+                SELECT src.name AS source, s.id AS session_id
                 FROM sessions s
                 JOIN sources src ON src.id=s.source_id
                 LEFT JOIN projects p ON p.id=s.project_id
                 LEFT JOIN models sm ON sm.id=s.model_id
                 LEFT JOIN users u ON u.id=s.user_id
                 LEFT JOIN machines mc ON mc.id=s.machine_id
-                """ + session_where + """
-                GROUP BY src.id, src.name
-                ORDER BY src.name
-                """,
+                """ + session_where,
                 session_params,
+            ).fetchall()
+            token_pairs = conn.execute(
+                """
+                SELECT src.name AS source, s.id AS session_id
+                FROM token_usage tu
+                JOIN sessions s ON s.id=tu.session_id
+                JOIN sources src ON src.id=s.source_id
+                LEFT JOIN projects p ON p.id=s.project_id
+                LEFT JOIN models tm ON tm.id=tu.model_id
+                LEFT JOIN models sm ON sm.id=s.model_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
+                """ + token_where,
+                token_params,
+            ).fetchall()
+            cache_sources = {
+                str(row["source"])
+                for row in conn.execute(
+                    """
+                    SELECT DISTINCT src.name AS source
+                    FROM token_usage tu
+                    JOIN sessions s ON s.id=tu.session_id
+                    JOIN sources src ON src.id=s.source_id
+                    LEFT JOIN projects p ON p.id=s.project_id
+                    LEFT JOIN models tm ON tm.id=tu.model_id
+                    LEFT JOIN models sm ON sm.id=s.model_id
+                    LEFT JOIN users u ON u.id=s.user_id
+                    LEFT JOIN machines mc ON mc.id=s.machine_id
+                    """ + cache_where,
+                    cache_params,
+                ).fetchall()
+            }
+            cost_pairs = conn.execute(
+                """
+                SELECT src.name AS source, s.id AS session_id
+                FROM costs c
+                JOIN sessions s ON s.id=c.session_id
+                JOIN sources src ON src.id=s.source_id
+                LEFT JOIN projects p ON p.id=s.project_id
+                LEFT JOIN models cm ON cm.id=c.model_id
+                LEFT JOIN models sm ON sm.id=s.model_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
+                """ + cost_where,
+                cost_params,
             ).fetchall()
             import_errors = int(
                 conn.execute(
@@ -472,6 +502,24 @@ class TeamAnalyticsService:
                 optimization_params,
             ).fetchall()
 
+        sessions_by_source: dict[str, set[int]] = {}
+        for row in [*session_pairs, *token_pairs, *cost_pairs]:
+            sessions_by_source.setdefault(str(row["source"]), set()).add(
+                int(row["session_id"])
+            )
+        token_sources = {str(row["source"]) for row in token_pairs}
+        cost_sources = {str(row["source"]) for row in cost_pairs}
+        source_coverage = [
+            {
+                "source": source,
+                "sessions": len(sessions_by_source[source]),
+                "has_tokens": source in token_sources,
+                "has_cache": source in cache_sources,
+                "has_cost": source in cost_sources,
+            }
+            for source in sorted(sessions_by_source)
+        ]
+
         total_tokens = int(model_tokens["total_tokens"] or 0)
         unknown_tokens = int(model_tokens["unknown_model_tokens"] or 0)
         return {
@@ -481,16 +529,7 @@ class TeamAnalyticsService:
             "unknown_model_ratio": (
                 unknown_tokens / total_tokens if total_tokens else 0.0
             ),
-            "source_coverage": [
-                {
-                    "source": row["source"],
-                    "sessions": int(row["sessions"] or 0),
-                    "has_tokens": bool(row["has_tokens"]),
-                    "has_cache": bool(row["has_cache"]),
-                    "has_cost": bool(row["has_cost"]),
-                }
-                for row in coverage_rows
-            ],
+            "source_coverage": source_coverage,
             "import_errors": import_errors,
             "optimization_confidence": [
                 dict(row) for row in confidence_rows
