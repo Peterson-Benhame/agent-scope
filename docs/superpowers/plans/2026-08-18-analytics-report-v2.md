@@ -361,7 +361,7 @@ Add exact examples:
 agentscope report --period today
 agentscope report --period 7d
 agentscope report --from 2026-08-01 --to 2026-08-18
-agentscope analyze --project BN.S584.PerfilInvestidor --period 30d
+agentscope analyze --project example-project --period 30d
 agentscope export --model gpt-5.6-terra --period month
 ```
 

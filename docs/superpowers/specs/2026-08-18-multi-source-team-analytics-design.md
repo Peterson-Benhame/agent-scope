@@ -288,7 +288,7 @@ agentscope report --from 2026-08-01 --to 2026-08-18
 agentscope report --period today
 agentscope report --period 7d
 agentscope report --period month
-agentscope analyze --project BN.S584.PerfilInvestidor --period 30d
+agentscope analyze --project example-project --period 30d
 ```
 
 Initial period aliases:
