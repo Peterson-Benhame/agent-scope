@@ -217,8 +217,15 @@ def _persist_transcript(repository: Repository, path: Path) -> int:
         explicit_model = normalize_model_name(message.get("model"))
         usage = message.get("usage")
         if isinstance(usage, dict):
-            input_tokens = _int_or_none(usage.get("input_tokens"))
+            uncached_input = _int_or_none(usage.get("input_tokens"))
+            cached_input = _int_or_none(usage.get("cache_read_input_tokens"))
+            cache_write = _int_or_none(usage.get("cache_creation_input_tokens"))
             output_tokens = _int_or_none(usage.get("output_tokens"))
+            input_tokens = (
+                int(uncached_input or 0)
+                + int(cached_input or 0)
+                + int(cache_write or 0)
+            )
             repository.insert_token_usage(
                 session_id,
                 None,
@@ -227,18 +234,10 @@ def _persist_transcript(repository: Repository, path: Path) -> int:
                     session_external_id=session_external_id,
                     model=explicit_model,
                     input_tokens=input_tokens,
-                    cached_input_tokens=_int_or_none(
-                        usage.get("cache_read_input_tokens")
-                    ),
-                    cache_write_input_tokens=_int_or_none(
-                        usage.get("cache_creation_input_tokens")
-                    ),
+                    cached_input_tokens=cached_input,
+                    cache_write_input_tokens=cache_write,
                     output_tokens=output_tokens,
-                    total_tokens=(
-                        int(input_tokens or 0) + int(output_tokens or 0)
-                        if input_tokens is not None or output_tokens is not None
-                        else None
-                    ),
+                    total_tokens=input_tokens + int(output_tokens or 0),
                     source_file=str(path),
                     source_line=line_number,
                 ),
