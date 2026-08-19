@@ -13,6 +13,7 @@ export interface DashboardViewModel {
   generatedAt: string;
   database: string;
   filters: SnapshotFilters;
+  isEmpty: boolean;
   cards: DashboardCards;
   dimensions: ExtensionSnapshot['dimensions'];
   quality: ExtensionSnapshot['quality'];
@@ -50,6 +51,7 @@ export function toDashboardViewModel(
     generatedAt: snapshot.generated_at,
     database: snapshot.database,
     filters,
+    isEmpty: snapshot.summary.sessions === 0,
     cards: {
       sessions: formatInteger(snapshot.summary.sessions),
       totalTokens: formatInteger(snapshot.summary.total_tokens),
