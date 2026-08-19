@@ -235,6 +235,50 @@ CREATE TABLE IF NOT EXISTS import_errors (
 """
 
 
+SCHEMA_V2 = """
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    stable_key TEXT NOT NULL UNIQUE,
+    display_name TEXT,
+    provider_user_id TEXT,
+    provider TEXT,
+    identity_confidence TEXT NOT NULL DEFAULT 'unknown',
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS machines (
+    id INTEGER PRIMARY KEY,
+    stable_key TEXT NOT NULL UNIQUE,
+    display_name TEXT,
+    os TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+"""
+
+
+SCHEMA_V3 = """
+CREATE TABLE IF NOT EXISTS team_bundles (
+    bundle_id TEXT PRIMARY KEY,
+    schema_version INTEGER NOT NULL,
+    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    organization TEXT,
+    team TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS team_event_provenance (
+    event_key TEXT NOT NULL,
+    bundle_id TEXT NOT NULL REFERENCES team_bundles(bundle_id) ON DELETE CASCADE,
+    source TEXT,
+    user_key TEXT,
+    machine_key TEXT,
+    PRIMARY KEY(event_key, bundle_id)
+);
+CREATE INDEX IF NOT EXISTS idx_team_event_provenance_event_key
+    ON team_event_provenance(event_key);
+"""
+
+
 class Database:
     def __init__(self, path: Path | str):
         self.path = Path(path)
@@ -254,6 +298,39 @@ class Database:
         finally:
             conn.close()
 
+    @staticmethod
+    def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+        return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})")}
+
+    def _migrate_v2(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(SCHEMA_V2)
+        columns = self._columns(conn, "sessions")
+        if "user_id" not in columns:
+            conn.execute(
+                "ALTER TABLE sessions ADD COLUMN user_id INTEGER REFERENCES users(id)"
+            )
+        if "machine_id" not in columns:
+            conn.execute(
+                "ALTER TABLE sessions ADD COLUMN machine_id INTEGER REFERENCES machines(id)"
+            )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_machine_id ON sessions(machine_id)"
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_migrations(version, description) VALUES(2, ?)",
+            ("Add user and machine identity",),
+        )
+
+    def _migrate_v3(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(SCHEMA_V3)
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_migrations(version, description) VALUES(3, ?)",
+            ("Add team bundle provenance",),
+        )
+
     def initialize(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA_V1)
@@ -261,3 +338,5 @@ class Database:
                 "INSERT OR IGNORE INTO schema_migrations(version, description) VALUES(1, ?)",
                 ("Initial AgentScope schema",),
             )
+            self._migrate_v2(conn)
+            self._migrate_v3(conn)
