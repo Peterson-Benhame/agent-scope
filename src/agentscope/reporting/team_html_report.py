@@ -17,6 +17,38 @@ def _cell(value: object) -> str:
     return escape("" if value is None else str(value))
 
 
+def _format_date(value) -> str:
+    return value.strftime("%d/%m/%Y")
+
+
+def _report_context(analytics: TeamAnalyticsService) -> str:
+    filters = analytics.filters
+    if filters.from_date is not None and filters.to_date is not None:
+        period = (
+            f"{_format_date(filters.from_date)} a "
+            f"{_format_date(filters.to_date)}"
+        )
+    elif filters.from_date is not None:
+        period = f"A partir de {_format_date(filters.from_date)}"
+    elif filters.to_date is not None:
+        period = f"Até {_format_date(filters.to_date)}"
+    else:
+        period = "Todo o histórico"
+
+    parts = [f"Período: {period}"]
+    if filters.project:
+        parts.append(f"Projeto: {filters.project}")
+    if filters.model:
+        parts.append(f"Modelo: {filters.model}")
+    if filters.source:
+        parts.append(f"Fonte: {filters.source}")
+    if filters.user:
+        parts.append(f"Usuário: {filters.user}")
+    if filters.machine:
+        parts.append(f"Máquina: {filters.machine}")
+    return "<p class='note'>" + " · ".join(escape(part) for part in parts) + "</p>"
+
+
 def _dimension_table(
     usage_rows: list[dict],
     cost_rows: list[dict],
@@ -132,6 +164,7 @@ def generate_team_html_report(
     del repository
     summary = analytics.summary()
     quality = analytics.data_quality()
+    context = _report_context(analytics)
     user_section = _dimension_table(
         analytics.by_user(), analytics.cost_by_user(), analytics.savings_by_user(),
         "user", "Por usuário",
@@ -168,6 +201,7 @@ th, td {{ text-align:left; padding:8px; border-bottom:1px solid #e5e7eb; }}
 </head>
 <body>
 <h1>Resumo da equipe</h1>
+{context}
 <p class="note">Volume de tokens mede uso, não produtividade ou desempenho individual.</p>
 <div class="cards">
 <div class="card"><span>Desenvolvedores</span><strong>{format_integer(summary.users)}</strong></div>
