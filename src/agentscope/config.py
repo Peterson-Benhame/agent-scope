@@ -9,12 +9,12 @@ from pathlib import Path
 class AgentScopeConfig:
     codex_home: Path
     headroom_home: Path
-    claude_home: Path
-    copilot_home: Path
-    kimi_home: Path
-    gemini_home: Path
     database_path: Path
     reports_path: Path
+    claude_home: Path | None = None
+    copilot_home: Path | None = None
+    kimi_home: Path | None = None
+    gemini_home: Path | None = None
     safe_mode: bool = True
     timezone: str | None = None
     enabled_sources: frozenset[str] | None = None
@@ -114,12 +114,12 @@ class AgentScopeConfig:
         return cls(
             codex_home=codex,
             headroom_home=headroom,
+            database_path=database,
+            reports_path=reports,
             claude_home=claude,
             copilot_home=copilot,
             kimi_home=kimi,
             gemini_home=gemini,
-            database_path=database,
-            reports_path=reports,
             safe_mode=safe_mode,
             timezone=os.environ.get("AGENTSCOPE_TIMEZONE"),
             enabled_sources=(
