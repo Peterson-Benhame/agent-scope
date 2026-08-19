@@ -9,6 +9,7 @@ from agentscope.cli import app
 runner = CliRunner()
 CODEX_FIXTURE = Path("tests/fixtures/codex/rollout.jsonl")
 HEADROOM_FIXTURE = Path("tests/fixtures/headroom")
+FIXTURE_ENV = {"AGENTSCOPE_SOURCES": "codex,headroom"}
 
 
 def arrange_sources(tmp_path):
@@ -35,6 +36,7 @@ def collect_fixture_data(tmp_path):
             "--database",
             str(db),
         ],
+        env=FIXTURE_ENV,
     )
     assert result.exit_code == 0, result.output
     return db, codex_home, headroom_home, result
@@ -61,19 +63,21 @@ def test_cli_collect_status_analyze_export_and_report(tmp_path):
             "--headroom-home",
             str(headroom_home),
         ],
+        env=FIXTURE_ENV,
     )
     assert status.exit_code == 0
     assert "sessions=1" in status.output
     assert "source=codex detected=yes artifacts=1" in status.output
     assert "source=headroom detected=yes artifacts=3" in status.output
 
-    analyze = runner.invoke(app, ["analyze", "--database", str(db)])
+    analyze = runner.invoke(app, ["analyze", "--database", str(db)], env=FIXTURE_ENV)
     assert analyze.exit_code == 0
     assert '"input_tokens": 18019' in analyze.output
 
     export = runner.invoke(
         app,
         ["export", "--database", str(db), "--output-dir", str(reports)],
+        env=FIXTURE_ENV,
     )
     assert export.exit_code == 0
     assert (reports / "sessions.csv").exists()
@@ -87,6 +91,7 @@ def test_cli_collect_status_analyze_export_and_report(tmp_path):
             "--output",
             str(reports / "report.html"),
         ],
+        env=FIXTURE_ENV,
     )
     assert report.exit_code == 0
     assert (reports / "report.html").exists()
@@ -133,6 +138,7 @@ def test_report_accepts_inclusive_from_and_to_dates(tmp_path):
             "--to",
             "2026-08-18",
         ],
+        env=FIXTURE_ENV,
     )
 
     assert result.exit_code == 0, result.output
@@ -147,6 +153,7 @@ def test_analyze_accepts_period_alias(tmp_path):
     result = runner.invoke(
         app,
         ["analyze", "--database", str(db), "--period", "30d"],
+        env=FIXTURE_ENV,
     )
 
     assert result.exit_code == 0, result.output
@@ -168,6 +175,7 @@ def test_export_filters_raw_datasets_by_project(tmp_path):
             "--project",
             "missing-project",
         ],
+        env=FIXTURE_ENV,
     )
 
     assert result.exit_code == 0, result.output
@@ -181,6 +189,7 @@ def test_invalid_period_returns_clear_cli_error(tmp_path):
     result = runner.invoke(
         app,
         ["analyze", "--database", str(db), "--period", "90d"],
+        env=FIXTURE_ENV,
     )
 
     assert result.exit_code != 0
@@ -193,7 +202,21 @@ def test_invalid_date_returns_clear_cli_error(tmp_path):
     result = runner.invoke(
         app,
         ["report", "--database", str(db), "--from", "18/08/2026"],
+        env=FIXTURE_ENV,
     )
 
     assert result.exit_code != 0
     assert "YYYY-MM-DD" in result.output
+
+
+def test_fixture_cli_flow_ignores_ambient_provider_configuration(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTSCOPE_SOURCES", "codex,headroom,kimi")
+    monkeypatch.setenv(
+        "AGENTSCOPE_KIMI_HOME",
+        str(Path("tests/fixtures/kimi").resolve()),
+    )
+
+    _, _, _, collect = collect_fixture_data(tmp_path)
+
+    assert "sessions_imported=1" in collect.output
+    assert "Fonte detectada: Kimi" not in collect.output
