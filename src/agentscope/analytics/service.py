@@ -546,3 +546,58 @@ class AnalyticsService:
                 params,
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def data_quality(self) -> dict[str, object]:
+        with self.repository.database.connect() as conn:
+            import_errors = int(
+                conn.execute("SELECT COUNT(*) AS n FROM import_errors").fetchone()["n"]
+            )
+            unknown_model_sessions = int(
+                conn.execute(
+                    "SELECT COUNT(*) AS n FROM sessions WHERE model_id IS NULL"
+                ).fetchone()["n"]
+            )
+            token_row = conn.execute(
+                """
+                SELECT
+                    COALESCE(SUM(tu.input_tokens), 0) AS total_input_tokens,
+                    COALESCE(SUM(
+                        CASE WHEN COALESCE(tu.model_id, s.model_id) IS NULL
+                             THEN tu.input_tokens ELSE 0 END
+                    ), 0) AS unknown_input_tokens
+                FROM token_usage tu
+                JOIN sessions s ON s.id=tu.session_id
+                """
+            ).fetchone()
+            total_input_tokens = int(token_row["total_input_tokens"] or 0)
+            unknown_input_tokens = int(token_row["unknown_input_tokens"] or 0)
+            confidence_rows = conn.execute(
+                """
+                SELECT correlation_confidence, COUNT(*) AS n
+                FROM optimizations
+                GROUP BY correlation_confidence
+                ORDER BY correlation_confidence
+                """
+            ).fetchall()
+            skill_evidence_rows = int(
+                conn.execute("SELECT COUNT(*) AS n FROM session_skills").fetchone()["n"]
+            )
+            agent_evidence_rows = int(
+                conn.execute("SELECT COUNT(*) AS n FROM session_agents").fetchone()["n"]
+            )
+
+        return {
+            "import_errors": import_errors,
+            "unknown_model_sessions": unknown_model_sessions,
+            "unknown_model_token_share": (
+                unknown_input_tokens / total_input_tokens
+                if total_input_tokens
+                else None
+            ),
+            "optimization_confidence": {
+                str(row["correlation_confidence"]): int(row["n"])
+                for row in confidence_rows
+            },
+            "skill_evidence_rows": skill_evidence_rows,
+            "agent_evidence_rows": agent_evidence_rows,
+        }
