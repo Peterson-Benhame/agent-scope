@@ -5,7 +5,12 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from agentscope.pricing.catalog import OPENAI_API_STANDARD_SCOPE, PricingCatalog, PricingRecord
+from agentscope.pricing.catalog import (
+    OPENAI_API_STANDARD_SCOPE,
+    PricingCatalog,
+    PricingRecord,
+    install_official_openai_history,
+)
 from agentscope.storage.repository import Repository
 
 
@@ -39,15 +44,32 @@ def _ensure_cost_link_schema(repository: Repository) -> None:
         )
 
 
-def _usage_rows(repository: Repository, utc_offset_minutes: int) -> list[dict[str, Any]]:
+def _usage_rows(
+    repository: Repository,
+    utc_offset_minutes: int,
+    *,
+    from_date: date | None,
+    to_date: date | None,
+) -> list[dict[str, Any]]:
     modifier = f"{utc_offset_minutes:+d} minutes"
+    clauses: list[str] = []
+    params: list[object] = []
+    local_day = f"date(tu.timestamp, '{modifier}')"
+    if from_date is not None:
+        clauses.append(f"{local_day} >= ?")
+        params.append(from_date.isoformat())
+    if to_date is not None:
+        clauses.append(f"{local_day} <= ?")
+        params.append(to_date.isoformat())
+    where = " WHERE " + " AND ".join(clauses) if clauses else ""
+
     with repository.database.connect() as conn:
         rows = conn.execute(
             f"""
             SELECT tu.id AS token_usage_id,
                    tu.session_id,
                    tu.timestamp,
-                   date(tu.timestamp, '{modifier}') AS usage_day,
+                   {local_day} AS usage_day,
                    COALESCE(tu.model_id, s.model_id) AS model_id,
                    COALESCE(tm.name, sm.name) AS model,
                    tu.input_tokens,
@@ -60,8 +82,10 @@ def _usage_rows(repository: Repository, utc_offset_minutes: int) -> list[dict[st
             LEFT JOIN models tm ON tm.id=tu.model_id
             LEFT JOIN models sm ON sm.id=s.model_id
             LEFT JOIN session_usage_context uc ON uc.session_id=s.id
+            {where}
             ORDER BY tu.id
-            """
+            """,
+            params,
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -186,9 +210,17 @@ def calculate_token_usage_costs(
     repository: Repository,
     *,
     utc_offset_minutes: int,
+    from_date: date | None = None,
+    to_date: date | None = None,
 ) -> CostCalculationSummary:
     _ensure_cost_link_schema(repository)
-    rows = _usage_rows(repository, utc_offset_minutes)
+    install_official_openai_history(repository)
+    rows = _usage_rows(
+        repository,
+        utc_offset_minutes,
+        from_date=from_date,
+        to_date=to_date,
+    )
     catalog = PricingCatalog(repository)
     by_model: dict[str, float] = defaultdict(float)
     reasons: Counter[str] = Counter()
