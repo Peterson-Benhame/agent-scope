@@ -114,6 +114,7 @@ class NormalizedTokenUsage:
     context_window: int | None = None
     source_file: str | None = None
     source_line: int | None = None
+    token_source: str = "source_reported"
 
 
 @dataclass(slots=True)
