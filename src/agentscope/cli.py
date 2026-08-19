@@ -9,10 +9,15 @@ from typing import Optional
 import typer
 
 from agentscope.analytics.budget import calculate_budget_status
-from agentscope.analytics.filters import AnalyticsFilter, resolve_period
+from agentscope.analytics.filters import (
+    AnalyticsFilter,
+    current_local_utc_offset_minutes,
+    resolve_period,
+)
 from agentscope.analytics.service import AnalyticsService
 from agentscope.analytics.team_service import TeamAnalyticsService
 from agentscope.config import AgentScopeConfig
+from agentscope.costs.calculator import calculate_token_usage_costs
 from agentscope.extension.snapshot import build_extension_snapshot
 from agentscope.identity_backfill import backfill_local_identity
 from agentscope.importer import (
@@ -36,11 +41,13 @@ extension_app = typer.Typer(help="Machine-readable integration commands.")
 identity_app = typer.Typer(help="Identity maintenance commands.")
 usage_context_app = typer.Typer(help="Session product, client and billing context maintenance.")
 pricing_app = typer.Typer(help="Versioned model pricing catalog maintenance.")
+costs_app = typer.Typer(help="Estimated token usage cost maintenance.")
 app.add_typer(team_app, name="team")
 app.add_typer(extension_app, name="extension")
 app.add_typer(identity_app, name="identity")
 app.add_typer(usage_context_app, name="usage-context")
 app.add_typer(pricing_app, name="pricing")
+app.add_typer(costs_app, name="costs")
 
 
 def _render_collect_progress(event: ProgressEvent) -> None:
@@ -187,6 +194,43 @@ def pricing_refresh(
         )
         return
     _render_pricing_refresh(result)
+
+
+@costs_app.command("calculate")
+def costs_calculate(
+    database: Optional[Path] = typer.Option(None, "--database"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    config = AgentScopeConfig.from_env(database_path=database)
+    repo = _repository(config.database_path)
+    result = calculate_token_usage_costs(
+        repo,
+        utc_offset_minutes=current_local_utc_offset_minutes(),
+    )
+    if json_output:
+        typer.echo(
+            json.dumps(
+                asdict(result),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+        return
+    typer.echo(
+        f"events_scanned={result.events_scanned} "
+        f"events_priced={result.events_priced} "
+        f"events_unpriced={result.events_unpriced} complete={str(result.complete).lower()}"
+    )
+    for model, cost in sorted(result.by_model.items()):
+        typer.echo(f"model={model} estimated_cost_usd={cost:.6f}")
+    total = (
+        f"{result.total_estimated_cost_usd:.6f}"
+        if result.total_estimated_cost_usd is not None
+        else "unavailable"
+    )
+    typer.echo(f"total_estimated_cost_usd={total}")
+    for reason, count in sorted(result.unpriced_reasons.items()):
+        typer.echo(f"unpriced_reason={reason} events={count}")
 
 
 @identity_app.command("backfill")
