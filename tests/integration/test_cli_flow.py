@@ -197,3 +197,16 @@ def test_invalid_date_returns_clear_cli_error(tmp_path):
 
     assert result.exit_code != 0
     assert "YYYY-MM-DD" in result.output
+
+
+def test_fixture_cli_flow_ignores_ambient_provider_configuration(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENTSCOPE_SOURCES", "codex,headroom,kimi")
+    monkeypatch.setenv(
+        "AGENTSCOPE_KIMI_HOME",
+        str(Path("tests/fixtures/kimi").resolve()),
+    )
+
+    _, _, _, collect = collect_fixture_data(tmp_path)
+
+    assert "sessions_imported=1" in collect.output
+    assert "Fonte detectada: Kimi" not in collect.output
