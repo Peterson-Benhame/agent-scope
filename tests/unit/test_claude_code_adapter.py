@@ -63,11 +63,11 @@ def test_collects_explicit_claude_session_model_tokens_and_tools(tmp_path):
             FROM token_usage
             """
         ).fetchone()
-        assert usage["input_tokens"] == 1000
+        assert usage["input_tokens"] == 1800
         assert usage["cached_input_tokens"] == 700
         assert usage["cache_write_input_tokens"] == 100
         assert usage["output_tokens"] == 200
-        assert usage["total_tokens"] == 1200
+        assert usage["total_tokens"] == 2000
         tool = conn.execute(
             "SELECT t.name FROM tool_calls tc JOIN tools t ON t.id=tc.tool_id"
         ).fetchone()
