@@ -17,7 +17,62 @@ export interface SnapshotSummary {
   tokens_saved: number;
   cache_ratio: number | null;
   observed_cost_usd: number | null;
+  estimated_cost_usd: number | null;
   estimated_savings_usd: number | null;
+}
+
+export type AvailabilityReason =
+  | 'source_does_not_report_cost'
+  | 'insufficient_pricing_data'
+  | 'no_optimization_data';
+
+export interface AvailabilityItem {
+  available: boolean;
+  reason: AvailabilityReason | null;
+}
+
+export interface SnapshotAvailability {
+  observed_cost: AvailabilityItem;
+  estimated_cost: AvailabilityItem;
+  estimated_savings: AvailabilityItem;
+}
+
+export interface DailySeriesPoint {
+  date: string;
+  sessions: number;
+  total_tokens: number;
+  cache_ratio: number | null;
+  observed_cost_usd: number | null;
+  estimated_cost_usd: number | null;
+  estimated_savings_usd: number | null;
+}
+
+export interface ProjectBreakdown {
+  project: string;
+  sessions: number;
+  total_tokens: number;
+}
+
+export interface ModelBreakdown {
+  model: string;
+  sessions: number;
+  total_tokens: number;
+}
+
+export interface SourceBreakdown {
+  source: string;
+  sessions: number;
+  total_tokens: number;
+}
+
+export interface SnapshotSeries {
+  daily: DailySeriesPoint[];
+}
+
+export interface SnapshotBreakdowns {
+  projects: ProjectBreakdown[];
+  models: ModelBreakdown[];
+  sources: SourceBreakdown[];
 }
 
 export interface SnapshotDimensions {
@@ -37,11 +92,14 @@ export interface SnapshotQuality {
 
 export interface ExtensionSnapshot {
   schema: 'agentscope-extension-snapshot';
-  version: 1;
+  version: 2;
   generated_at: string;
   database: string;
   filters: SnapshotFilters;
   summary: SnapshotSummary;
+  availability: SnapshotAvailability;
+  series: SnapshotSeries;
+  breakdowns: SnapshotBreakdowns;
   dimensions: SnapshotDimensions;
   quality: SnapshotQuality;
 }
@@ -64,8 +122,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
 function isNumberOrNull(value: unknown): value is number | null {
-  return value === null || (typeof value === 'number' && Number.isFinite(value));
+  return value === null || isFiniteNumber(value);
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -73,23 +135,63 @@ function isStringArray(value: unknown): value is string[] {
 }
 
 function isNumberRecord(value: unknown): value is Record<string, number> {
-  return isRecord(value) && Object.values(value).every(
-    (item) => typeof item === 'number' && Number.isFinite(item),
-  );
+  return isRecord(value) && Object.values(value).every(isFiniteNumber);
 }
 
 function invalid(message: string): never {
   throw new SnapshotContractError('SNAPSHOT_INVALID_JSON', message);
 }
 
+function validateAvailabilityItem(value: unknown): void {
+  const reasons = new Set([
+    'source_does_not_report_cost',
+    'insufficient_pricing_data',
+    'no_optimization_data',
+  ]);
+  if (!isRecord(value) || typeof value.available !== 'boolean') {
+    invalid('Snapshot availability item is invalid.');
+  }
+  if (value.reason !== null && !reasons.has(String(value.reason))) {
+    invalid('Snapshot availability reason is invalid.');
+  }
+}
+
+function validateDaily(value: unknown): void {
+  if (!Array.isArray(value)) invalid('Snapshot daily series is invalid.');
+  for (const item of value) {
+    if (
+      !isRecord(item) ||
+      typeof item.date !== 'string' ||
+      !isFiniteNumber(item.sessions) ||
+      !isFiniteNumber(item.total_tokens) ||
+      !isNumberOrNull(item.cache_ratio) ||
+      !isNumberOrNull(item.observed_cost_usd) ||
+      !isNumberOrNull(item.estimated_cost_usd) ||
+      !isNumberOrNull(item.estimated_savings_usd)
+    ) {
+      invalid('Snapshot daily series item is invalid.');
+    }
+  }
+}
+
+function validateBreakdown(value: unknown, labelKey: string): void {
+  if (!Array.isArray(value)) invalid('Snapshot breakdown is invalid.');
+  for (const item of value) {
+    if (
+      !isRecord(item) ||
+      typeof item[labelKey] !== 'string' ||
+      !isFiniteNumber(item.sessions) ||
+      !isFiniteNumber(item.total_tokens)
+    ) {
+      invalid(`Snapshot ${labelKey} breakdown is invalid.`);
+    }
+  }
+}
+
 export function parseExtensionSnapshot(value: unknown): ExtensionSnapshot {
-  if (!isRecord(value)) {
-    return invalid('Snapshot must be an object.');
-  }
-  if (value.schema !== 'agentscope-extension-snapshot') {
-    return invalid('Unexpected snapshot schema.');
-  }
-  if (value.version !== 1) {
+  if (!isRecord(value)) return invalid('Snapshot must be an object.');
+  if (value.schema !== 'agentscope-extension-snapshot') return invalid('Unexpected snapshot schema.');
+  if (value.version !== 2) {
     throw new SnapshotContractError(
       'SNAPSHOT_UNSUPPORTED_VERSION',
       `Unsupported snapshot version: ${String(value.version)}`,
@@ -98,21 +200,35 @@ export function parseExtensionSnapshot(value: unknown): ExtensionSnapshot {
   if (typeof value.generated_at !== 'string' || typeof value.database !== 'string') {
     return invalid('Snapshot metadata is invalid.');
   }
-  if (!isRecord(value.filters) || !isRecord(value.summary) || !isRecord(value.dimensions) || !isRecord(value.quality)) {
+  if (
+    !isRecord(value.filters) || !isRecord(value.summary) ||
+    !isRecord(value.availability) || !isRecord(value.series) ||
+    !isRecord(value.breakdowns) || !isRecord(value.dimensions) ||
+    !isRecord(value.quality)
+  ) {
     return invalid('Snapshot sections are invalid.');
   }
 
   const summary = value.summary;
   if (
-    typeof summary.sessions !== 'number' ||
-    typeof summary.total_tokens !== 'number' ||
-    typeof summary.tokens_saved !== 'number' ||
+    !isFiniteNumber(summary.sessions) ||
+    !isFiniteNumber(summary.total_tokens) ||
+    !isFiniteNumber(summary.tokens_saved) ||
     !isNumberOrNull(summary.cache_ratio) ||
     !isNumberOrNull(summary.observed_cost_usd) ||
+    !isNumberOrNull(summary.estimated_cost_usd) ||
     !isNumberOrNull(summary.estimated_savings_usd)
   ) {
     return invalid('Snapshot summary is invalid.');
   }
+
+  validateAvailabilityItem(value.availability.observed_cost);
+  validateAvailabilityItem(value.availability.estimated_cost);
+  validateAvailabilityItem(value.availability.estimated_savings);
+  validateDaily(value.series.daily);
+  validateBreakdown(value.breakdowns.projects, 'project');
+  validateBreakdown(value.breakdowns.models, 'model');
+  validateBreakdown(value.breakdowns.sources, 'source');
 
   const dimensions = value.dimensions;
   if (
@@ -127,8 +243,8 @@ export function parseExtensionSnapshot(value: unknown): ExtensionSnapshot {
 
   const quality = value.quality;
   if (
-    typeof quality.import_errors !== 'number' ||
-    typeof quality.tokens_without_model !== 'number' ||
+    !isFiniteNumber(quality.import_errors) ||
+    !isFiniteNumber(quality.tokens_without_model) ||
     !isNumberRecord(quality.identity_confidence) ||
     !isNumberRecord(quality.correlation_confidence)
   ) {
