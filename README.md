@@ -58,6 +58,8 @@ Collect new or changed local data:
 agentscope collect
 ```
 
+During collection, AgentScope shows discovery status and an overall progress bar with the current source/file until it reaches 100%.
+
 Inspect source and database status:
 
 ```powershell
