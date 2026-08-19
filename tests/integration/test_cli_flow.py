@@ -25,21 +25,28 @@ def test_cli_collect_status_analyze_export_and_report(tmp_path):
     codex_home, headroom_home = arrange_sources(tmp_path)
     db = tmp_path / "agentscope.db"
     reports = tmp_path / "reports"
+
     collect = runner.invoke(app, [
         "collect", "--codex-home", str(codex_home), "--headroom-home", str(headroom_home),
         "--database", str(db),
     ])
     assert collect.exit_code == 0, collect.output
+    assert "Coletando" in collect.output
+    assert "100%" in collect.output
     assert "sessions_imported=1" in collect.output
+
     status = runner.invoke(app, ["status", "--database", str(db), "--codex-home", str(codex_home), "--headroom-home", str(headroom_home)])
     assert status.exit_code == 0
     assert "sessions=1" in status.output
+
     analyze = runner.invoke(app, ["analyze", "--database", str(db)])
     assert analyze.exit_code == 0
     assert '"input_tokens": 18019' in analyze.output
+
     export = runner.invoke(app, ["export", "--database", str(db), "--output-dir", str(reports)])
     assert export.exit_code == 0
     assert (reports / "sessions.csv").exists()
+
     report = runner.invoke(app, ["report", "--database", str(db), "--output", str(reports / "report.html")])
     assert report.exit_code == 0
     assert (reports / "report.html").exists()

@@ -9,13 +9,42 @@ import typer
 
 from agentscope.analytics.service import AnalyticsService
 from agentscope.config import AgentScopeConfig
-from agentscope.importer import collect_sources
+from agentscope.importer import ProgressEvent, collect_sources
 from agentscope.reporting.export import export_datasets
 from agentscope.reporting.html_report import generate_html_report
 from agentscope.storage.database import Database
 from agentscope.storage.repository import Repository
 
 app = typer.Typer(help="Local-first observability and analytics for agent execution histories.")
+
+
+def _render_collect_progress(event: ProgressEvent) -> None:
+    if event.stage == "discovering":
+        typer.echo("Descobrindo arquivos...")
+        return
+
+    if event.stage == "collecting":
+        total = event.total
+        percent = int((event.current / total) * 100) if total else 0
+        width = 30
+        filled = int((percent / 100) * width)
+        bar = "█" * filled + "░" * (width - filled)
+        source = event.source.capitalize() if event.source else ""
+        filename = Path(event.current_file).name if event.current_file else ""
+        if len(filename) > 48:
+            filename = f"{filename[:45]}..."
+        detail = " ".join(part for part in (source, filename) if part)
+        suffix = f" {detail}" if detail else ""
+        typer.echo(
+            f"\rColetando [{bar}] {percent:3d}% {event.current}/{total}{suffix}",
+            nl=bool(total and event.current >= total),
+        )
+        return
+
+    if event.stage == "complete":
+        if event.total == 0:
+            typer.echo(f"Coletando [{'█' * 30}] 100% 0/0")
+        typer.echo("Finalizado.")
 
 
 def _repository(database: Path) -> Repository:
@@ -38,6 +67,7 @@ def collect(
         codex_home=config.codex_home,
         headroom_home=config.headroom_home,
         full_rescan=full_rescan,
+        progress=_render_collect_progress,
     )
     typer.echo(
         f"files_seen={summary.files_seen} files_imported={summary.files_imported} "
