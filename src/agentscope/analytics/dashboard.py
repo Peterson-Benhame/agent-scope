@@ -17,6 +17,19 @@ class DashboardAnalyticsService(AnalyticsService):
     ) -> None:
         super().__init__(repository, filters)
 
+    def _where(
+        self,
+        *,
+        date_expression: str | None = None,
+        **kwargs: Any,
+    ) -> tuple[str, list[object]]:
+        local_expression = (
+            self.filters.local_date_expression(date_expression)
+            if date_expression
+            else None
+        )
+        return super()._where(date_expression=local_expression, **kwargs)
+
     def _usage_where(self, date_expression: str) -> tuple[str, list[object]]:
         return self._where(
             date_expression=date_expression,
@@ -172,6 +185,11 @@ class DashboardAnalyticsService(AnalyticsService):
         return None
 
     def by_day(self) -> list[dict[str, Any]]:
+        session_day = self.filters.local_date_expression("s.started_at")
+        usage_day = self.filters.local_date_expression("tu.timestamp")
+        cost_day = self.filters.local_date_expression("c.period_start")
+        optimization_day = self.filters.local_date_expression("op.timestamp")
+
         session_where, session_params = self._where(
             date_expression="s.started_at",
             project_expression="p.name",
@@ -202,8 +220,8 @@ class DashboardAnalyticsService(AnalyticsService):
 
         with self.repository.database.connect() as conn:
             started_session_rows = conn.execute(
-                """
-                SELECT substr(s.started_at, 1, 10) AS day,
+                f"""
+                SELECT {session_day} AS day,
                        s.id AS session_id
                 FROM sessions s
                 LEFT JOIN projects p ON p.id=s.project_id
@@ -216,8 +234,8 @@ class DashboardAnalyticsService(AnalyticsService):
             ).fetchall()
 
             usage_session_rows = conn.execute(
-                """
-                SELECT DISTINCT substr(tu.timestamp, 1, 10) AS day,
+                f"""
+                SELECT DISTINCT {usage_day} AS day,
                        s.id AS session_id
                 FROM token_usage tu
                 JOIN sessions s ON s.id=tu.session_id
@@ -232,8 +250,8 @@ class DashboardAnalyticsService(AnalyticsService):
             ).fetchall()
 
             usage_rows = conn.execute(
-                """
-                SELECT substr(tu.timestamp, 1, 10) AS day,
+                f"""
+                SELECT {usage_day} AS day,
                        COALESCE(SUM(tu.input_tokens), 0) AS input_tokens,
                        COALESCE(SUM(tu.cached_input_tokens), 0) AS cached_input_tokens,
                        COALESCE(SUM(tu.total_tokens), 0) AS total_tokens
@@ -245,16 +263,16 @@ class DashboardAnalyticsService(AnalyticsService):
                 JOIN sources src ON src.id=s.source_id
                 LEFT JOIN users u ON u.id=s.user_id
                 LEFT JOIN machines mc ON mc.id=s.machine_id
-                """ + usage_where + """
-                GROUP BY substr(tu.timestamp, 1, 10)
+                """ + usage_where + f"""
+                GROUP BY {usage_day}
                 ORDER BY day
                 """,
                 usage_params,
             ).fetchall()
 
             cost_rows = conn.execute(
-                """
-                SELECT substr(c.period_start, 1, 10) AS day,
+                f"""
+                SELECT {cost_day} AS day,
                        SUM(c.observed_cost_usd) AS observed_cost_usd,
                        SUM(c.estimated_raw_cost_usd) AS estimated_cost_usd,
                        SUM(c.total_savings_usd) AS total_savings_usd,
@@ -268,16 +286,16 @@ class DashboardAnalyticsService(AnalyticsService):
                 LEFT JOIN sources src ON src.id=s.source_id
                 LEFT JOIN users u ON u.id=s.user_id
                 LEFT JOIN machines mc ON mc.id=s.machine_id
-                """ + cost_where + """
-                GROUP BY substr(c.period_start, 1, 10)
+                """ + cost_where + f"""
+                GROUP BY {cost_day}
                 ORDER BY day
                 """,
                 cost_params,
             ).fetchall()
 
             optimization_rows = conn.execute(
-                """
-                SELECT substr(op.timestamp, 1, 10) AS day,
+                f"""
+                SELECT {optimization_day} AS day,
                        SUM(op.compression_savings_usd) AS compression_savings_usd,
                        SUM(op.cache_savings_usd) AS cache_savings_usd
                 FROM optimizations op
@@ -288,8 +306,8 @@ class DashboardAnalyticsService(AnalyticsService):
                 LEFT JOIN sources src ON src.id=s.source_id
                 LEFT JOIN users u ON u.id=s.user_id
                 LEFT JOIN machines mc ON mc.id=s.machine_id
-                """ + optimization_where + """
-                GROUP BY substr(op.timestamp, 1, 10)
+                """ + optimization_where + f"""
+                GROUP BY {optimization_day}
                 ORDER BY day
                 """,
                 optimization_params,
