@@ -149,6 +149,7 @@ def _persist_cost(
     price: PricingRecord,
     cost_usd: float,
 ) -> None:
+    event_key = f"token_usage_cost:{int(row['token_usage_id'])}"
     with repository.database.connect() as conn:
         conn.execute(
             """
@@ -157,9 +158,10 @@ def _persist_cost(
                 estimated_raw_cost_usd, observed_cost_usd,
                 pricing_source, pricing_version, event_key
             ) VALUES(?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
-            ON CONFLICT(token_usage_id) DO UPDATE SET
+            ON CONFLICT(event_key) DO UPDATE SET
                 session_id=excluded.session_id,
                 model_id=excluded.model_id,
+                token_usage_id=excluded.token_usage_id,
                 period_start=excluded.period_start,
                 period_end=excluded.period_end,
                 estimated_raw_cost_usd=excluded.estimated_raw_cost_usd,
@@ -175,7 +177,7 @@ def _persist_cost(
                 cost_usd,
                 price.source_url,
                 price.source_version,
-                f"token_usage_cost:{int(row['token_usage_id'])}",
+                event_key,
             ),
         )
 
