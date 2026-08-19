@@ -10,6 +10,7 @@ from agentscope.domain.models import (
     NormalizedMessage,
     NormalizedSession,
     NormalizedTokenUsage,
+    NormalizedToolCall,
 )
 from agentscope.sources.base import (
     CollectRequest,
@@ -21,7 +22,7 @@ from agentscope.sources.base import (
 from agentscope.storage.repository import Repository
 
 
-_FORMAT_VERSION = "session-jsonl-v1"
+_FORMAT_VERSION = "jsonl-v1"
 
 
 class GeminiAdapter:
@@ -67,6 +68,7 @@ class GeminiAdapter:
             messages=True,
             tokens=True,
             cache=True,
+            tools=True,
         )
 
     def collect(self, request: CollectRequest) -> SourceCollectionSummary:
@@ -131,6 +133,56 @@ def _supported_session(path: Path) -> bool:
     )
 
 
+def _content_text(content: Any) -> str | None:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return None
+    parts = [
+        item.get("text")
+        for item in content
+        if isinstance(item, dict) and isinstance(item.get("text"), str)
+    ]
+    return "\n".join(parts) if parts else None
+
+
+def _persist_tool_calls(
+    repository: Repository,
+    session_id: int,
+    external_id: str,
+    record: dict[str, Any],
+    path: Path,
+    line_number: int,
+) -> None:
+    tool_calls = record.get("toolCalls")
+    if not isinstance(tool_calls, list):
+        return
+    for index, tool in enumerate(tool_calls):
+        if not isinstance(tool, dict):
+            continue
+        name = tool.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        args = tool.get("args")
+        encoded = json.dumps(args, ensure_ascii=False, sort_keys=True)
+        repository.insert_tool_call(
+            session_id,
+            None,
+            NormalizedToolCall(
+                name=name.strip(),
+                timestamp=str(tool.get("timestamp") or record.get("timestamp") or ""),
+                external_call_id=(str(tool.get("id")) if tool.get("id") else None),
+                session_external_id=external_id,
+                status=(str(tool.get("status")) if tool.get("status") else None),
+                provider="google",
+                category="tool",
+                input_size=len(encoded),
+                source_file=str(path),
+                source_line=line_number * 1000 + index,
+            ),
+        )
+
+
 def _persist_session(repository: Repository, path: Path) -> int:
     records = _records(path)
     if not records or not _supported_session(path):
@@ -162,6 +214,7 @@ def _persist_session(repository: Repository, path: Path) -> int:
             metadata={
                 "format_version": _FORMAT_VERSION,
                 "project_hash": str(metadata["projectHash"]),
+                "kind": metadata.get("kind"),
             },
         )
     )
@@ -171,14 +224,13 @@ def _persist_session(repository: Repository, path: Path) -> int:
         if record_type not in {"user", "gemini"}:
             continue
         timestamp = str(record.get("timestamp") or "")
-        content = record.get("content")
         repository.insert_message(
             session_id,
             None,
             NormalizedMessage(
                 role="user" if record_type == "user" else "assistant",
                 timestamp=timestamp,
-                content=str(content) if isinstance(content, str) else None,
+                content=_content_text(record.get("content")),
                 session_external_id=external_id,
                 source_file=str(path),
                 source_line=line_number,
@@ -186,8 +238,17 @@ def _persist_session(repository: Repository, path: Path) -> int:
         )
         if record_type != "gemini":
             continue
-        usage = record.get("usageMetadata")
-        if not isinstance(usage, dict):
+
+        _persist_tool_calls(
+            repository,
+            session_id,
+            external_id,
+            record,
+            path,
+            line_number,
+        )
+        tokens = record.get("tokens")
+        if not isinstance(tokens, dict):
             continue
         repository.insert_token_usage(
             session_id,
@@ -196,13 +257,11 @@ def _persist_session(repository: Repository, path: Path) -> int:
                 timestamp=timestamp,
                 session_external_id=external_id,
                 model=normalize_model_name(record.get("model")),
-                input_tokens=_int_or_none(usage.get("promptTokenCount")),
-                cached_input_tokens=_int_or_none(
-                    usage.get("cachedContentTokenCount")
-                ),
-                output_tokens=_int_or_none(usage.get("candidatesTokenCount")),
-                reasoning_output_tokens=_int_or_none(usage.get("thoughtsTokenCount")),
-                total_tokens=_int_or_none(usage.get("totalTokenCount")),
+                input_tokens=_int_or_none(tokens.get("input")),
+                cached_input_tokens=_int_or_none(tokens.get("cached")),
+                output_tokens=_int_or_none(tokens.get("output")),
+                reasoning_output_tokens=_int_or_none(tokens.get("thoughts")),
+                total_tokens=_int_or_none(tokens.get("total")),
                 source_file=str(path),
                 source_line=line_number,
             ),
