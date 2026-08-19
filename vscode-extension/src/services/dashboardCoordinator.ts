@@ -8,6 +8,7 @@ import {
   applyFilterPatch,
   applyPeriod,
   createDefaultFilterState,
+  reconcileDimensionFilters,
   resetFilters,
 } from '../state/filterState';
 import { DashboardViewProvider } from '../views/dashboardViewProvider';
@@ -45,16 +46,13 @@ export class DashboardCoordinator {
 
     try {
       const snapshot = await client.snapshot(this.filters);
-      if (sequence !== this.requestSequence) {
-        return;
-      }
+      if (sequence !== this.requestSequence) return;
+      this.filters = reconcileDimensionFilters(this.filters, snapshot.dimensions);
       this.sources.setItems(snapshot.dimensions.sources);
       this.projects.setItems(snapshot.dimensions.projects);
       this.dashboard.update(snapshot, this.filters);
     } catch (error) {
-      if (sequence !== this.requestSequence) {
-        return;
-      }
+      if (sequence !== this.requestSequence) return;
       const mapped = this.mapError(error);
       this.output.appendLine(`[${mapped.code}] ${mapped.detail}`);
       this.dashboard.showError(mapped.code, mapped.message);
