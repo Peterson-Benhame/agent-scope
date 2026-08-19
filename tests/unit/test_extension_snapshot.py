@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from pathlib import Path
 
 from agentscope.analytics.filters import AnalyticsFilter
@@ -116,6 +117,65 @@ def test_build_extension_snapshot_has_stable_allow_listed_v2_contract(tmp_path):
     serialized = json.dumps(snapshot, ensure_ascii=False)
     assert "PRIVATE_PROMPT_SENTINEL" not in serialized
     assert r"C:\private\provider\rollout.jsonl" not in serialized
+
+
+def test_snapshot_counts_session_active_by_tokens_inside_selected_period(tmp_path):
+    repo, db = make_repo(tmp_path)
+    with db.connect() as conn:
+        source_id = conn.execute("SELECT id FROM sources WHERE name='codex'").fetchone()[0]
+        project_id = conn.execute("SELECT id FROM projects WHERE name='example-project'").fetchone()[0]
+        model_id = conn.execute("SELECT id FROM models WHERE name='gpt-example'").fetchone()[0]
+        user_id = conn.execute("SELECT id FROM users WHERE stable_key='user-a'").fetchone()[0]
+        machine_id = conn.execute("SELECT id FROM machines WHERE stable_key='machine-a'").fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO sessions(
+                source_id, external_session_id, project_id, started_at,
+                model_id, user_id, machine_id
+            ) VALUES(?, 'cross-period', ?, '2026-08-12T22:00:00Z', ?, ?, ?)
+            """,
+            (source_id, project_id, model_id, user_id, machine_id),
+        )
+        session_id = conn.execute(
+            "SELECT id FROM sessions WHERE external_session_id='cross-period'"
+        ).fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO token_usage(
+                session_id, timestamp, model_id, input_tokens,
+                cached_input_tokens, output_tokens, total_tokens, event_key
+            ) VALUES(?, '2026-08-13T10:00:00Z', ?, 100, 80, 50, 150, 'cross-token')
+            """,
+            (session_id, model_id),
+        )
+
+    snapshot = build_extension_snapshot(
+        repo,
+        AnalyticsFilter(
+            from_date=date(2026, 8, 13),
+            to_date=date(2026, 8, 13),
+            user="Dev A",
+            machine="Notebook A",
+        ),
+        period="7d",
+        database_path=db.path,
+    )
+
+    assert snapshot["summary"]["sessions"] == 1
+    assert snapshot["series"]["daily"] == [
+        {
+            "date": "2026-08-13",
+            "sessions": 1,
+            "total_tokens": 150,
+            "cache_ratio": 0.8,
+            "observed_cost_usd": None,
+            "estimated_cost_usd": None,
+            "estimated_savings_usd": None,
+        }
+    ]
+    assert snapshot["breakdowns"]["sources"] == [
+        {"source": "codex", "sessions": 1, "total_tokens": 150}
+    ]
 
 
 def test_extension_snapshot_keeps_unknown_money_null_with_reason_codes(tmp_path):
