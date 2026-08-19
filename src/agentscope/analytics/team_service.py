@@ -79,6 +79,49 @@ class TeamAnalyticsService:
             return None
         return float(row[key])
 
+    def _global_optimizer_savings(self) -> float | None:
+        filters = self.filters
+        if any(
+            value is not None
+            for value in (
+                filters.project,
+                filters.source,
+                filters.user,
+                filters.machine,
+            )
+        ):
+            return None
+
+        clauses = [
+            "op.session_id IS NULL",
+            "(op.compression_savings_usd IS NOT NULL "
+            "OR op.cache_savings_usd IS NOT NULL)",
+        ]
+        params: list[object] = []
+        if filters.from_date is not None:
+            clauses.append("substr(op.timestamp, 1, 10) >= ?")
+            params.append(filters.from_date.isoformat())
+        if filters.to_date is not None:
+            clauses.append("substr(op.timestamp, 1, 10) <= ?")
+            params.append(filters.to_date.isoformat())
+        if filters.model is not None:
+            clauses.append("om.name = ?")
+            params.append(filters.model)
+
+        with self.repository.database.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT SUM(
+                           COALESCE(op.compression_savings_usd, 0) +
+                           COALESCE(op.cache_savings_usd, 0)
+                       ) AS savings
+                FROM optimizations op
+                LEFT JOIN models om ON om.id=op.model_id
+                WHERE """ + " AND ".join(clauses),
+                params,
+            ).fetchone()
+        return self._nullable_float(row, "savings")
+
     def summary(self) -> TeamAnalyticsSummary:
         session_where, session_params = self._where(
             date_expression="s.started_at",
@@ -139,11 +182,18 @@ class TeamAnalyticsService:
             ).fetchone()
 
         savings_rows = self.savings_by_user()
-        savings = (
+        attributed_savings = (
             sum(float(row["total_savings_usd"]) for row in savings_rows)
             if savings_rows
             else None
         )
+        global_savings = self._global_optimizer_savings()
+        known_savings = [
+            value
+            for value in (attributed_savings, global_savings)
+            if value is not None
+        ]
+        savings = sum(known_savings) if known_savings else None
 
         return TeamAnalyticsSummary(
             users=int(counts["users"] or 0),
