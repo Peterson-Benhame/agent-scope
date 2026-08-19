@@ -3,11 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agentscope.analytics.dashboard import DashboardAnalyticsService
 from agentscope.analytics.filters import AnalyticsFilter
 from agentscope.analytics.service import AnalyticsService
 from agentscope.extension.contracts import (
     SNAPSHOT_SCHEMA,
     SNAPSHOT_VERSION,
+    AvailabilityItem,
+    SnapshotAvailability,
     SnapshotDimensions,
     SnapshotQuality,
     SnapshotSummary,
@@ -172,6 +175,13 @@ def _has_savings_evidence(repository: Repository, filters: AnalyticsFilter) -> b
     return int(optimization_row["n"]) > 0
 
 
+def _availability(value: float | None, reason: str) -> AvailabilityItem:
+    return AvailabilityItem(
+        available=value is not None,
+        reason=None if value is not None else reason,
+    )
+
+
 def build_extension_snapshot(
     repository: Repository,
     filters: AnalyticsFilter,
@@ -180,12 +190,34 @@ def build_extension_snapshot(
     database_path: Path,
 ) -> dict[str, object]:
     analytics = AnalyticsService(repository, filters)
+    dashboard = DashboardAnalyticsService(repository, filters)
     summary = analytics.summary()
     quality = analytics.data_quality()
     optimization_confidence = quality.get("optimization_confidence", {})
     if not isinstance(optimization_confidence, dict):
         optimization_confidence = {}
-    savings = summary.total_savings_usd if _has_savings_evidence(repository, filters) else None
+
+    observed_cost = summary.observed_cost_usd
+    estimated_cost = summary.estimated_raw_cost_usd
+    estimated_savings = (
+        summary.total_savings_usd
+        if _has_savings_evidence(repository, filters)
+        else None
+    )
+    availability = SnapshotAvailability(
+        observed_cost=_availability(
+            observed_cost,
+            "source_does_not_report_cost",
+        ),
+        estimated_cost=_availability(
+            estimated_cost,
+            "insufficient_pricing_data",
+        ),
+        estimated_savings=_availability(
+            estimated_savings,
+            "no_optimization_data",
+        ),
+    )
 
     return {
         "schema": SNAPSHOT_SCHEMA,
@@ -208,10 +240,20 @@ def build_extension_snapshot(
                 total_tokens=summary.total_tokens,
                 tokens_saved=summary.tokens_saved,
                 cache_ratio=summary.cache_ratio if summary.input_tokens else None,
-                observed_cost_usd=summary.observed_cost_usd,
-                estimated_savings_usd=savings,
+                observed_cost_usd=observed_cost,
+                estimated_cost_usd=estimated_cost,
+                estimated_savings_usd=estimated_savings,
             )
         ),
+        "availability": to_dict(availability),
+        "series": {
+            "daily": dashboard.by_day(),
+        },
+        "breakdowns": {
+            "projects": dashboard.by_project(),
+            "models": dashboard.by_model(),
+            "sources": dashboard.by_source(),
+        },
         "dimensions": to_dict(_dimensions(repository)),
         "quality": to_dict(
             SnapshotQuality(
