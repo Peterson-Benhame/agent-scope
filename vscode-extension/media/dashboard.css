@@ -75,6 +75,7 @@ input:focus-visible {
 .card-subtitle,
 .status,
 .chart-empty,
+.breakdown-details,
 .notes {
   color: var(--vscode-descriptionForeground);
 }
@@ -261,6 +262,12 @@ input:focus-visible {
 
 .breakdown-header strong {
   flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.breakdown-details {
+  font-size: 0.82em;
+  line-height: 1.3;
   font-variant-numeric: tabular-nums;
 }
 
