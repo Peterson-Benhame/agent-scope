@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -7,6 +8,7 @@ import pytest
 from agentscope.codex_account.app_server import (
     CodexAppServerClient,
     CodexAppServerError,
+    detect_codex_thread_usage_support,
     discover_codex_binary,
 )
 
@@ -68,6 +70,69 @@ def test_client_classifies_thread_usage_rpc_error_without_leaking_message(monkey
     assert exc.value.rpc_code == -32603
     assert "SECRET_SHOULD_NOT_LEAK" not in str(exc.value)
     assert "Bearer" not in str(exc.value)
+
+
+def test_detects_thread_usage_unsupported_from_generated_schema(tmp_path, monkeypatch):
+    codex = tmp_path / "codex.CMD"
+    codex.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "agentscope.codex_account.app_server.discover_codex_binary",
+        lambda *_args, **_kwargs: str(codex),
+    )
+
+    def fake_run(command, **kwargs):
+        out = Path(command[-1])
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "ClientRequest.json").write_text(
+            '{"account/usage/read":{"params":"GetAccountTokenUsageParams"}}',
+            encoding="utf-8",
+        )
+        (out / "GetAccountTokenUsageParams.json").write_text(
+            '{"type":"object","properties":{}}',
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    assert detect_codex_thread_usage_support() is False
+
+
+def test_detects_thread_usage_supported_from_generated_schema(tmp_path, monkeypatch):
+    codex = tmp_path / "codex.CMD"
+    codex.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "agentscope.codex_account.app_server.discover_codex_binary",
+        lambda *_args, **_kwargs: str(codex),
+    )
+
+    def fake_run(command, **kwargs):
+        out = Path(command[-1])
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "GetAccountTokenUsageParams.json").write_text(
+            '{"type":"object","properties":{"threadId":{"type":["string","null"]}}}',
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    assert detect_codex_thread_usage_support() is True
+
+
+def test_thread_usage_capability_is_unknown_when_schema_generation_fails(tmp_path, monkeypatch):
+    codex = tmp_path / "codex.CMD"
+    codex.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "agentscope.codex_account.app_server.discover_codex_binary",
+        lambda *_args, **_kwargs: str(codex),
+    )
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 2, "", "failed"),
+    )
+
+    assert detect_codex_thread_usage_support() is None
 
 
 def test_discovers_vscode_bundled_codex_on_windows(tmp_path, monkeypatch):
