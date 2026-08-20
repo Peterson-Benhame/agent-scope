@@ -216,7 +216,7 @@ export function toDashboardViewModel(
         sessions: row.sessions,
         totalTokens: row.total_tokens,
       })),
-      clients: snapshot.breakdowns.clients.map((row) => ({
+      clients: (snapshot.breakdowns.clients ?? []).map((row) => ({
         label: row.client,
         sessions: row.sessions,
         totalTokens: row.total_tokens,
