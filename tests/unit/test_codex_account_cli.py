@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from typer.testing import CliRunner
 
@@ -11,6 +12,7 @@ from agentscope.storage.database import Database
 
 
 runner = CliRunner()
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def test_codex_account_status_empty_database_is_unavailable(tmp_path):
@@ -62,6 +64,7 @@ def test_codex_account_sync_exposes_historical_thread_flags():
         color=False,
     )
     assert result.exit_code == 0, result.output
-    assert "--threads" in result.stdout
-    assert "--from" in result.stdout
-    assert "--to" in result.stdout
+    output = ANSI_ESCAPE.sub("", result.stdout)
+    assert "--threads" in output
+    assert "--from" in output
+    assert "--to" in output
