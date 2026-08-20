@@ -121,6 +121,7 @@ def test_sync_thread_usage_persists_backend_model_without_rewriting_raw_model(tm
     assert summary.threads_requested == 1
     assert summary.threads_synced == 1
     assert summary.threads_unavailable == 0
+    assert summary.thread_usage_supported is True
 
     with repo.database.connect() as conn:
         snapshot = conn.execute(
@@ -214,3 +215,24 @@ def test_unavailable_thread_billing_route_stays_null(tmp_path):
     assert row["billing_route_available"] == 0
     assert row["estimated_usage_credits_micros"] is None
     assert row["estimated_usage_usd_micros"] is None
+
+
+def test_unsupported_thread_usage_marks_all_unavailable_without_rpc_calls(tmp_path):
+    repo, exact_session = _repo_with_sessions(tmp_path)
+
+    class MustNotCallClient:
+        def account_usage_read(self, thread_id=None):
+            raise AssertionError("thread usage RPC must not be called")
+
+    summary = sync_thread_usage(
+        repo,
+        client=MustNotCallClient(),
+        thread_ids=[LocalCodexThread(THREAD_ID, exact_session, "2026-08-18T21:21:05Z")],
+        thread_usage_supported=False,
+    )
+
+    assert summary.thread_usage_supported is False
+    assert summary.threads_requested == 1
+    assert summary.threads_synced == 0
+    assert summary.threads_unavailable == 1
+    assert summary.errors == 0
