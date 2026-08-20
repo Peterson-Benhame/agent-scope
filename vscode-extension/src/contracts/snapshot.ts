@@ -85,6 +85,13 @@ export interface SourceBreakdown {
   total_tokens: number;
 }
 
+export interface ClientBreakdown {
+  client: string;
+  sessions: number;
+  total_tokens: number;
+  share: number;
+}
+
 export interface SnapshotSeries {
   daily: DailySeriesPoint[];
 }
@@ -93,6 +100,7 @@ export interface SnapshotBreakdowns {
   projects: ProjectBreakdown[];
   models: ModelBreakdown[];
   sources: SourceBreakdown[];
+  clients: ClientBreakdown[];
 }
 
 export interface SnapshotDimensions {
@@ -250,6 +258,23 @@ function validateModelBreakdown(value: unknown): void {
   }
 }
 
+function validateClientBreakdown(value: unknown): void {
+  if (!Array.isArray(value)) invalid('Snapshot client breakdown is invalid.');
+  for (const item of value) {
+    if (
+      !isRecord(item) ||
+      typeof item.client !== 'string' ||
+      !isFiniteNumber(item.sessions) ||
+      !isFiniteNumber(item.total_tokens) ||
+      !isFiniteNumber(item.share) ||
+      item.share < 0 ||
+      item.share > 1
+    ) {
+      invalid('Snapshot client breakdown is invalid.');
+    }
+  }
+}
+
 function validateFreshness(value: unknown): void {
   if (!isRecord(value)) invalid('Snapshot freshness is invalid.');
   if (
@@ -306,6 +331,7 @@ export function parseExtensionSnapshot(value: unknown): ExtensionSnapshot {
   validateBreakdown(value.breakdowns.projects, 'project');
   validateModelBreakdown(value.breakdowns.models);
   validateBreakdown(value.breakdowns.sources, 'source');
+  validateClientBreakdown(value.breakdowns.clients);
 
   const dimensions = value.dimensions;
   if (
