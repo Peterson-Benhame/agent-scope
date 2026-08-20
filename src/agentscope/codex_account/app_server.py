@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import queue
+import shutil
 import subprocess
+import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 
@@ -15,6 +18,56 @@ _ALLOWED_REQUESTS = {
     "account/usage/read",
 }
 _ALLOWED_NOTIFICATIONS = {"initialized"}
+
+
+def discover_codex_binary(
+    codex_bin: str = "codex",
+    *,
+    home: Path | None = None,
+    platform: str | None = None,
+) -> str | None:
+    """Resolve Codex without reading any authentication material.
+
+    Prefer an explicit/path-resolvable binary. On Windows, fall back to the
+    executable bundled with the official OpenAI VS Code extension because the
+    extension can be installed and authenticated even when `codex` is not on
+    PATH.
+    """
+    direct_path = Path(codex_bin).expanduser()
+    if direct_path.is_file():
+        return str(direct_path)
+
+    on_path = shutil.which(codex_bin)
+    if on_path:
+        return on_path
+
+    current_platform = platform or sys.platform
+    if current_platform != "win32" or codex_bin != "codex":
+        return None
+
+    user_home = home or Path.home()
+    candidates: list[Path] = []
+    for extensions_root in (
+        user_home / ".vscode" / "extensions",
+        user_home / ".vscode-insiders" / "extensions",
+    ):
+        if not extensions_root.is_dir():
+            continue
+        candidates.extend(
+            candidate
+            for candidate in extensions_root.glob(
+                "openai.chatgpt-*/bin/windows-*/codex.exe"
+            )
+            if candidate.is_file()
+        )
+
+    if not candidates:
+        return None
+
+    # Extension upgrades can leave older versions installed. Prefer the most
+    # recently modified bundled executable instead of relying on version-name
+    # lexical ordering.
+    return str(max(candidates, key=lambda path: path.stat().st_mtime))
 
 
 class CodexAppServerError(RuntimeError):
@@ -53,7 +106,16 @@ class CodexAppServerClient:
     def start(self) -> None:
         if self._process is not None:
             return
-        command = self.command or [self.codex_bin, "app-server", "--stdio"]
+        if self.command is not None:
+            command = self.command
+        else:
+            resolved = discover_codex_binary(self.codex_bin)
+            if resolved is None:
+                raise CodexAppServerError(
+                    "codex_not_found",
+                    "codex_not_found",
+                )
+            command = [resolved, "app-server", "--stdio"]
         try:
             self._process = subprocess.Popen(
                 command,
