@@ -100,7 +100,11 @@ def detect_codex_thread_usage_support(
                 text = schema_file.read_text(encoding="utf-8", errors="ignore")
                 if "account/usage/read" in text:
                     found_account_usage = True
-                if "GetAccountTokenUsageParams" in text and "threadId" in text:
+                is_usage_params_schema = (
+                    schema_file.stem == "GetAccountTokenUsageParams"
+                    or "GetAccountTokenUsageParams" in text
+                )
+                if is_usage_params_schema and "threadId" in text:
                     found_thread_id = True
             if found_thread_id:
                 return True
