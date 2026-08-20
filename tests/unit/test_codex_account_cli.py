@@ -53,3 +53,11 @@ def test_codex_account_status_reads_only_stored_snapshot(tmp_path):
     assert payload["primary_used_percent"] == 63
     assert payload["credits_balance"] == "18.42"
     assert "email" not in payload
+
+
+def test_codex_account_sync_exposes_historical_thread_flags():
+    result = runner.invoke(app, ["codex-account", "sync", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "--threads" in result.stdout
+    assert "--from" in result.stdout
+    assert "--to" in result.stdout
