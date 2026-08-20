@@ -20,6 +20,11 @@ const snapshot: ExtensionSnapshot = {
     cache_ratio: 0.9463,
     observed_cost_usd: 13.777,
     estimated_cost_usd: 21.034,
+    known_estimated_cost_usd: 21.034,
+    estimated_cost_events_total: 4,
+    estimated_cost_events_priced: 4,
+    estimated_cost_coverage: 1,
+    estimated_cost_complete: true,
     estimated_savings_usd: 76.891,
   },
   billing: {
@@ -97,6 +102,34 @@ describe('dashboard view model', () => {
     assert.strictEqual(vm.cards.estimatedSavings.value, 'US$ 76,89');
   });
 
+  it('shows a partial API-equivalent value with coverage instead of hiding the known subtotal', () => {
+    const partial: ExtensionSnapshot = {
+      ...snapshot,
+      summary: {
+        ...snapshot.summary,
+        estimated_cost_usd: null,
+        known_estimated_cost_usd: 31.65021856,
+        estimated_cost_events_total: 682,
+        estimated_cost_events_priced: 680,
+        estimated_cost_coverage: 680 / 682,
+        estimated_cost_complete: false,
+      },
+      availability: {
+        ...snapshot.availability,
+        estimated_cost: { available: false, reason: 'insufficient_pricing_data' },
+      },
+    };
+
+    const vm = toDashboardViewModel(partial, { period: '7d' });
+
+    assert.strictEqual(vm.cards.estimatedCost.label, 'Custo equivalente via API');
+    assert.strictEqual(vm.cards.estimatedCost.value, 'US$ 31,65');
+    assert.ok(vm.cards.estimatedCost.subtitle?.includes('Estimativa parcial'));
+    assert.ok(vm.cards.estimatedCost.subtitle?.includes('680 de 682 eventos'));
+    assert.ok(vm.cards.estimatedCost.subtitle?.includes('99,71%'));
+    assert.ok(vm.cards.estimatedCost.subtitle?.includes('não representa gasto real'));
+  });
+
   it('shows the latest successful collection timestamp', () => {
     const vm = toDashboardViewModel(snapshot, { period: '7d' });
     assert.ok(vm.lastImportedLabel.startsWith('Última coleta:'));
@@ -124,7 +157,7 @@ describe('dashboard view model', () => {
       withBilling('unknown', 'openai_api_equivalent'),
       { period: '7d' },
     );
-    assert.strictEqual(vm.cards.estimatedCost.label, 'Equivalente API');
+    assert.strictEqual(vm.cards.estimatedCost.label, 'Custo equivalente via API');
     assert.ok(vm.cards.estimatedCost.subtitle?.includes('não representa gasto real'));
   });
 
@@ -143,7 +176,7 @@ describe('dashboard view model', () => {
         withBilling(mode, 'openai_api_equivalent'),
         { period: '7d' },
       );
-      assert.strictEqual(vm.cards.estimatedCost.label, 'Equivalente API');
+      assert.strictEqual(vm.cards.estimatedCost.label, 'Custo equivalente via API');
       assert.ok(vm.cards.estimatedCost.subtitle?.includes('não representa gasto real'));
     }
   });
@@ -175,7 +208,7 @@ describe('dashboard view model', () => {
       costEventsTotal: 4,
       costEventsPriced: 4,
       costComplete: true,
-      costLabel: 'Equivalente API',
+      costLabel: 'Custo equivalente via API',
     });
     assert.deepStrictEqual(vm.breakdowns.models[1], {
       label: 'codex-auto-review',
@@ -185,7 +218,7 @@ describe('dashboard view model', () => {
       costEventsTotal: 1,
       costEventsPriced: 0,
       costComplete: false,
-      costLabel: 'Equivalente API',
+      costLabel: 'Custo equivalente via API',
     });
   });
 
@@ -199,6 +232,11 @@ describe('dashboard view model', () => {
         cache_ratio: null,
         observed_cost_usd: null,
         estimated_cost_usd: null,
+        known_estimated_cost_usd: null,
+        estimated_cost_events_total: 0,
+        estimated_cost_events_priced: 0,
+        estimated_cost_coverage: 0,
+        estimated_cost_complete: false,
         estimated_savings_usd: null,
       },
       series: { daily: [] },
