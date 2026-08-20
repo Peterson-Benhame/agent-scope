@@ -46,6 +46,30 @@ def test_client_times_out_with_sanitized_error(monkeypatch):
     monkeypatch.delenv("FAKE_CODEX_HANG", raising=False)
 
 
+def test_client_classifies_usage_profile_rpc_error_without_leaking_message(monkeypatch):
+    monkeypatch.setenv("FAKE_CODEX_USAGE_ERROR", "profile")
+    with pytest.raises(CodexAppServerError) as exc:
+        with CodexAppServerClient(command=_fake_command(), timeout_seconds=1.0) as client:
+            client.account_usage_read()
+
+    assert exc.value.code == "token_usage_profile_failed"
+    assert exc.value.rpc_code == -32603
+    assert "SECRET_SHOULD_NOT_LEAK" not in str(exc.value)
+    assert "Bearer" not in str(exc.value)
+
+
+def test_client_classifies_thread_usage_rpc_error_without_leaking_message(monkeypatch):
+    monkeypatch.setenv("FAKE_CODEX_USAGE_ERROR", "thread")
+    with pytest.raises(CodexAppServerError) as exc:
+        with CodexAppServerClient(command=_fake_command(), timeout_seconds=1.0) as client:
+            client.account_usage_read("01a016bf-d4e0-7383-9c3d-872eeeb5c5fa")
+
+    assert exc.value.code == "thread_usage_backend_failed"
+    assert exc.value.rpc_code == -32603
+    assert "SECRET_SHOULD_NOT_LEAK" not in str(exc.value)
+    assert "Bearer" not in str(exc.value)
+
+
 def test_discovers_vscode_bundled_codex_on_windows(tmp_path, monkeypatch):
     monkeypatch.setattr("shutil.which", lambda _: None)
     extension = (
