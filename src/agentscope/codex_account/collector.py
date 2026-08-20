@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any
+from datetime import date, datetime, timezone
+from typing import Any, Sequence
 
 from agentscope.codex_account.app_server import CodexAppServerClient, CodexAppServerError
-from agentscope.codex_account.models import CodexAccountSnapshot
+from agentscope.codex_account.models import (
+    CodexAccountSnapshot,
+    CodexThreadUsageGroup,
+    CodexThreadUsageSnapshot,
+)
 from agentscope.codex_account.storage import CodexAccountStorage
 from agentscope.storage.repository import Repository
 
@@ -17,6 +21,21 @@ class CodexAccountSyncResult:
     plan_type: str | None
     credits_balance: str | None
     error_code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LocalCodexThread:
+    thread_id: str
+    session_id: int
+    started_at: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ThreadSyncSummary:
+    threads_requested: int
+    threads_synced: int
+    threads_unavailable: int
+    errors: int
 
 
 def _string_or_none(value: object) -> str | None:
@@ -122,3 +141,139 @@ def sync_account_usage(
     finally:
         if owns_client:
             active_client.close()
+
+
+def select_local_codex_threads(
+    repository: Repository,
+    from_date: date | None,
+    to_date: date | None,
+    *,
+    utc_offset_minutes: int,
+) -> list[LocalCodexThread]:
+    clauses = ["src.name='codex'", "trim(s.external_session_id) <> ''"]
+    params: list[object] = []
+    modifier = f"{utc_offset_minutes:+d} minutes"
+    if from_date is not None:
+        clauses.append("date(s.started_at, ?) >= ?")
+        params.extend([modifier, from_date.isoformat()])
+    if to_date is not None:
+        clauses.append("date(s.started_at, ?) <= ?")
+        params.extend([modifier, to_date.isoformat()])
+    with repository.database.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT s.id, s.external_session_id, s.started_at
+            FROM sessions s
+            JOIN sources src ON src.id=s.source_id
+            WHERE """
+            + " AND ".join(clauses)
+            + " ORDER BY s.started_at, s.id",
+            params,
+        ).fetchall()
+    return [
+        LocalCodexThread(
+            thread_id=str(row["external_session_id"]),
+            session_id=int(row["id"]),
+            started_at=str(row["started_at"]) if row["started_at"] is not None else None,
+        )
+        for row in rows
+    ]
+
+
+def _map_thread_group(value: object) -> CodexThreadUsageGroup | None:
+    group = _dict_or_empty(value)
+    credits = _int_or_none(group.get("estimatedUsageCreditsMicros"))
+    if credits is None:
+        return None
+    return CodexThreadUsageGroup(
+        model=_string_or_none(group.get("model")),
+        reasoning_effort=_string_or_none(group.get("reasoningEffort")),
+        speed=_string_or_none(group.get("speed")),
+        estimated_usage_credits_micros=credits,
+        net_new_input_tokens=_int_or_none(group.get("netNewInputTokens")),
+        cached_input_tokens=_int_or_none(group.get("cachedInputTokens")),
+        input_tokens=_int_or_none(group.get("inputTokens")),
+        output_tokens=_int_or_none(group.get("outputTokens")),
+        total_tokens=_int_or_none(group.get("totalTokens")),
+    )
+
+
+def _map_thread_usage(
+    thread: LocalCodexThread,
+    result: dict[str, object],
+    captured_at: str,
+) -> CodexThreadUsageSnapshot:
+    usage_value = result.get("threadUsage")
+    if not isinstance(usage_value, dict):
+        return CodexThreadUsageSnapshot(
+            captured_at=captured_at,
+            thread_id=thread.thread_id,
+            session_id=thread.session_id,
+            estimated_usage_credits_micros=None,
+            estimated_usage_usd_micros=None,
+            billing_route_available=False,
+        )
+    response_thread_id = _string_or_none(usage_value.get("threadId"))
+    if response_thread_id != thread.thread_id:
+        return CodexThreadUsageSnapshot(
+            captured_at=captured_at,
+            thread_id=thread.thread_id,
+            session_id=thread.session_id,
+            estimated_usage_credits_micros=None,
+            estimated_usage_usd_micros=None,
+            status="invalid_thread_response",
+            billing_route_available=False,
+        )
+    raw_groups = usage_value.get("groups")
+    groups = tuple(
+        group
+        for group in (
+            _map_thread_group(value)
+            for value in raw_groups
+        )
+        if group is not None
+    ) if isinstance(raw_groups, list) else ()
+    return CodexThreadUsageSnapshot(
+        captured_at=captured_at,
+        thread_id=thread.thread_id,
+        session_id=thread.session_id,
+        estimated_usage_credits_micros=_int_or_none(
+            usage_value.get("estimatedUsageCreditsMicros")
+        ),
+        estimated_usage_usd_micros=_int_or_none(
+            usage_value.get("estimatedUsageUsdMicros")
+        ),
+        groups=groups,
+    )
+
+
+def sync_thread_usage(
+    repository: Repository,
+    *,
+    client: object,
+    thread_ids: Sequence[LocalCodexThread],
+) -> ThreadSyncSummary:
+    storage = CodexAccountStorage(repository.database)
+    synced = 0
+    unavailable = 0
+    errors = 0
+    for thread in thread_ids:
+        captured_at = datetime.now(timezone.utc).isoformat()
+        try:
+            result = client.account_usage_read(thread.thread_id)
+            if not isinstance(result, dict):
+                raise ValueError("invalid thread usage response")
+            snapshot = _map_thread_usage(thread, result, captured_at)
+            storage.insert_thread_usage_snapshot(snapshot)
+            if snapshot.billing_route_available:
+                synced += 1
+            else:
+                unavailable += 1
+        except Exception:
+            errors += 1
+    return ThreadSyncSummary(
+        threads_requested=len(thread_ids),
+        threads_synced=synced,
+        threads_unavailable=unavailable,
+        errors=errors,
+    )
