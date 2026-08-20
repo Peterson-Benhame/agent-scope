@@ -18,6 +18,11 @@ export interface SnapshotSummary {
   cache_ratio: number | null;
   observed_cost_usd: number | null;
   estimated_cost_usd: number | null;
+  known_estimated_cost_usd?: number | null;
+  estimated_cost_events_total?: number;
+  estimated_cost_events_priced?: number;
+  estimated_cost_coverage?: number;
+  estimated_cost_complete?: boolean;
   estimated_savings_usd: number | null;
 }
 
@@ -275,6 +280,32 @@ function validateClientBreakdown(value: unknown): void {
   }
 }
 
+function validateEstimatedCostCoverage(summary: Record<string, unknown>): void {
+  const known = summary.known_estimated_cost_usd;
+  const total = summary.estimated_cost_events_total;
+  const priced = summary.estimated_cost_events_priced;
+  const coverage = summary.estimated_cost_coverage;
+  const complete = summary.estimated_cost_complete;
+  const fields = [known, total, priced, coverage, complete];
+  const anyPresent = fields.some((value) => value !== undefined);
+  if (!anyPresent) return;
+
+  if (
+    !isNumberOrNull(known) ||
+    !isFiniteNumber(total) ||
+    !isFiniteNumber(priced) ||
+    !isFiniteNumber(coverage) ||
+    typeof complete !== 'boolean' ||
+    total < 0 ||
+    priced < 0 ||
+    priced > total ||
+    coverage < 0 ||
+    coverage > 1
+  ) {
+    invalid('Snapshot estimated cost coverage is invalid.');
+  }
+}
+
 function validateFreshness(value: unknown): void {
   if (!isRecord(value)) invalid('Snapshot freshness is invalid.');
   if (
@@ -322,6 +353,7 @@ export function parseExtensionSnapshot(value: unknown): ExtensionSnapshot {
   ) {
     return invalid('Snapshot summary is invalid.');
   }
+  validateEstimatedCostCoverage(summary);
 
   validateBilling(value.billing);
   validateAvailabilityItem(value.availability.observed_cost);
