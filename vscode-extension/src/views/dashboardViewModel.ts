@@ -37,6 +37,14 @@ export interface DashboardBreakdownPoint {
   totalTokens: number;
 }
 
+export interface DashboardModelBreakdownPoint extends DashboardBreakdownPoint {
+  estimatedCostUsd: number | null;
+  costEventsTotal: number;
+  costEventsPriced: number;
+  costComplete: boolean;
+  costLabel: string;
+}
+
 export interface DashboardViewModel {
   generatedAt: string;
   database: string;
@@ -49,7 +57,7 @@ export interface DashboardViewModel {
   series: { daily: DashboardDailyPoint[] };
   breakdowns: {
     projects: DashboardBreakdownPoint[];
-    models: DashboardBreakdownPoint[];
+    models: DashboardModelBreakdownPoint[];
     sources: DashboardBreakdownPoint[];
   };
 }
@@ -107,17 +115,20 @@ function metric(
   };
 }
 
+function costLabel(snapshot: ExtensionSnapshot): string {
+  return snapshot.billing.mode === 'api' ? 'Custo estimado API' : 'Equivalente API';
+}
+
 function estimatedCostMetric(snapshot: ExtensionSnapshot): DashboardMetric {
   const base = metric(
     formatUsd(snapshot.summary.estimated_cost_usd),
     snapshot.availability.estimated_cost,
   );
-  let label = 'Equivalente API';
+  const label = costLabel(snapshot);
   let billingNote: string;
 
   switch (snapshot.billing.mode) {
     case 'api':
-      label = 'Custo estimado API';
       billingNote = 'Estimativa baseada em tokens e preços da API; não é cobrança observada.';
       break;
     case 'chatgpt_codex_plan':
@@ -143,6 +154,7 @@ export function toDashboardViewModel(
   filters: SnapshotFilters,
 ): DashboardViewModel {
   const freshnessLabel = lastImportedLabel(snapshot);
+  const modelCostLabel = costLabel(snapshot);
   return {
     generatedAt: snapshot.generated_at,
     database: `${snapshot.database} · ${freshnessLabel}`,
@@ -187,6 +199,11 @@ export function toDashboardViewModel(
         label: row.model,
         sessions: row.sessions,
         totalTokens: row.total_tokens,
+        estimatedCostUsd: row.estimated_cost_usd,
+        costEventsTotal: row.cost_events_total,
+        costEventsPriced: row.cost_events_priced,
+        costComplete: row.cost_complete,
+        costLabel: modelCostLabel,
       })),
       sources: snapshot.breakdowns.sources.map((row) => ({
         label: row.source,
