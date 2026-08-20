@@ -280,6 +280,46 @@ class DashboardAnalyticsService(AnalyticsService):
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def by_client(self) -> list[dict[str, Any]]:
+        where, params = self._usage_where("tu.timestamp")
+        client_expression = "COALESCE(suc.client, 'unknown')"
+        with self.repository.database.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {client_expression} AS client,
+                       COUNT(DISTINCT s.id) AS sessions,
+                       COALESCE(SUM(tu.total_tokens), 0) AS total_tokens
+                FROM token_usage tu
+                JOIN sessions s ON s.id=tu.session_id
+                LEFT JOIN projects p ON p.id=s.project_id
+                LEFT JOIN models tm ON tm.id=tu.model_id
+                LEFT JOIN models sm ON sm.id=s.model_id
+                JOIN sources src ON src.id=s.source_id
+                LEFT JOIN users u ON u.id=s.user_id
+                LEFT JOIN machines mc ON mc.id=s.machine_id
+                LEFT JOIN session_usage_context suc ON suc.session_id=s.id
+                """ + where + f"""
+                GROUP BY {client_expression}
+                ORDER BY total_tokens DESC, client
+                """,
+                params,
+            ).fetchall()
+
+        total_tokens = sum(int(row["total_tokens"] or 0) for row in rows)
+        return [
+            {
+                "client": str(row["client"]),
+                "sessions": int(row["sessions"] or 0),
+                "total_tokens": int(row["total_tokens"] or 0),
+                "share": (
+                    int(row["total_tokens"] or 0) / total_tokens
+                    if total_tokens
+                    else 0.0
+                ),
+            }
+            for row in rows
+        ]
+
     @staticmethod
     def _known_savings(
         cost_row: dict[str, Any] | None,
