@@ -16,6 +16,11 @@ class SnapshotSummary:
     cache_ratio: float | None
     observed_cost_usd: float | None
     estimated_cost_usd: float | None
+    known_estimated_cost_usd: float | None
+    estimated_cost_events_total: int
+    estimated_cost_events_priced: int
+    estimated_cost_coverage: float
+    estimated_cost_complete: bool
     estimated_savings_usd: float | None
 
 
