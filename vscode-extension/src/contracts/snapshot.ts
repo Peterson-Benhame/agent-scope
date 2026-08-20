@@ -100,7 +100,7 @@ export interface SnapshotBreakdowns {
   projects: ProjectBreakdown[];
   models: ModelBreakdown[];
   sources: SourceBreakdown[];
-  clients: ClientBreakdown[];
+  clients?: ClientBreakdown[];
 }
 
 export interface SnapshotDimensions {
@@ -331,7 +331,9 @@ export function parseExtensionSnapshot(value: unknown): ExtensionSnapshot {
   validateBreakdown(value.breakdowns.projects, 'project');
   validateModelBreakdown(value.breakdowns.models);
   validateBreakdown(value.breakdowns.sources, 'source');
-  validateClientBreakdown(value.breakdowns.clients);
+  if (value.breakdowns.clients !== undefined) {
+    validateClientBreakdown(value.breakdowns.clients);
+  }
 
   const dimensions = value.dimensions;
   if (
