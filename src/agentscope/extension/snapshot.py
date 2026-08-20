@@ -269,6 +269,7 @@ def build_extension_snapshot(
             "projects": dashboard.by_project(),
             "models": dashboard.by_model(),
             "sources": dashboard.by_source(),
+            "clients": dashboard.by_client(),
         },
         "dimensions": to_dict(_dimensions(repository)),
         "quality": to_dict(
