@@ -1,9 +1,14 @@
+import os
 import sys
 from pathlib import Path
 
 import pytest
 
-from agentscope.codex_account.app_server import CodexAppServerClient, CodexAppServerError
+from agentscope.codex_account.app_server import (
+    CodexAppServerClient,
+    CodexAppServerError,
+    discover_codex_binary,
+)
 
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "codex_app_server" / "fake_app_server.py"
@@ -39,3 +44,74 @@ def test_client_times_out_with_sanitized_error(monkeypatch):
     assert exc.value.code == "timeout"
     assert "access_token" not in str(exc.value).lower()
     monkeypatch.delenv("FAKE_CODEX_HANG", raising=False)
+
+
+def test_discovers_vscode_bundled_codex_on_windows(tmp_path, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda _: None)
+    extension = (
+        tmp_path
+        / ".vscode"
+        / "extensions"
+        / "openai.chatgpt-26.803.61601-win32-x64"
+        / "bin"
+        / "windows-x86_64"
+        / "codex.exe"
+    )
+    extension.parent.mkdir(parents=True)
+    extension.write_bytes(b"")
+
+    resolved = discover_codex_binary(
+        "codex",
+        home=tmp_path,
+        platform="win32",
+    )
+
+    assert resolved == str(extension)
+
+
+def test_discovers_newest_vscode_bundled_codex_on_windows(tmp_path, monkeypatch):
+    monkeypatch.setattr("shutil.which", lambda _: None)
+    older = (
+        tmp_path
+        / ".vscode"
+        / "extensions"
+        / "openai.chatgpt-26.700.10000-win32-x64"
+        / "bin"
+        / "windows-x86_64"
+        / "codex.exe"
+    )
+    newer = (
+        tmp_path
+        / ".vscode"
+        / "extensions"
+        / "openai.chatgpt-26.803.61601-win32-x64"
+        / "bin"
+        / "windows-x86_64"
+        / "codex.exe"
+    )
+    for candidate in (older, newer):
+        candidate.parent.mkdir(parents=True)
+        candidate.write_bytes(b"")
+    os.utime(older, (1, 1))
+    os.utime(newer, (2, 2))
+
+    resolved = discover_codex_binary(
+        "codex",
+        home=tmp_path,
+        platform="win32",
+    )
+
+    assert resolved == str(newer)
+
+
+def test_explicit_codex_binary_path_is_authoritative(tmp_path):
+    explicit = tmp_path / "custom-codex.exe"
+    explicit.write_bytes(b"")
+
+    resolved = discover_codex_binary(
+        str(explicit),
+        home=tmp_path,
+        platform="win32",
+    )
+
+    assert resolved == str(explicit)
