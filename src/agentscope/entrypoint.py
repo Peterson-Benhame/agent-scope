@@ -10,7 +10,10 @@ import typer
 
 from agentscope.analytics.filters import current_local_utc_offset_minutes
 from agentscope.cli import app
-from agentscope.codex_account.app_server import CodexAppServerClient
+from agentscope.codex_account.app_server import (
+    CodexAppServerClient,
+    detect_codex_thread_usage_support,
+)
 from agentscope.codex_account.collector import (
     select_local_codex_threads,
     sync_account_usage,
@@ -112,6 +115,12 @@ def codex_account_sync(
     if from_date is not None and to_date is not None and from_date > to_date:
         raise typer.BadParameter("--from não pode ser posterior a --to.")
 
+    thread_usage_supported = (
+        detect_codex_thread_usage_support(codex_bin)
+        if threads
+        else None
+    )
+
     with CodexAppServerClient(
         codex_bin=codex_bin,
         timeout_seconds=timeout_seconds,
@@ -129,6 +138,7 @@ def codex_account_sync(
                 repo,
                 client=client,
                 thread_ids=local_threads,
+                thread_usage_supported=thread_usage_supported,
             )
 
     payload = asdict(result)
@@ -145,6 +155,7 @@ def codex_account_sync(
         )
         if thread_summary is not None:
             typer.echo(
+                f"thread_usage_supported={thread_summary.thread_usage_supported} "
                 f"threads_requested={thread_summary.threads_requested} "
                 f"threads_synced={thread_summary.threads_synced} "
                 f"threads_unavailable={thread_summary.threads_unavailable} "
