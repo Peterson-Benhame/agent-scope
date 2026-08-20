@@ -44,7 +44,15 @@ const valid = {
   },
   breakdowns: {
     projects: [{ project: 'example-project', sessions: 1, total_tokens: 150 }],
-    models: [{ model: 'gpt-example', sessions: 1, total_tokens: 150 }],
+    models: [{
+      model: 'gpt-example',
+      sessions: 1,
+      total_tokens: 150,
+      estimated_cost_usd: 0.20,
+      cost_events_total: 1,
+      cost_events_priced: 1,
+      cost_complete: true,
+    }],
     sources: [{ source: 'codex', sessions: 1, total_tokens: 150 }],
   },
   dimensions: {
@@ -98,6 +106,19 @@ describe('parseExtensionSnapshot', () => {
       () => parseExtensionSnapshot({
         ...valid,
         billing: { ...valid.billing, estimated_cost_basis: 'actual_spend' },
+      }),
+      (error: unknown) => error instanceof SnapshotContractError && error.code === 'SNAPSHOT_INVALID_JSON',
+    );
+  });
+
+  it('rejects malformed model cost coverage', () => {
+    assert.throws(
+      () => parseExtensionSnapshot({
+        ...valid,
+        breakdowns: {
+          ...valid.breakdowns,
+          models: [{ ...valid.breakdowns.models[0], cost_events_priced: 'one' }],
+        },
       }),
       (error: unknown) => error instanceof SnapshotContractError && error.code === 'SNAPSHOT_INVALID_JSON',
     );
