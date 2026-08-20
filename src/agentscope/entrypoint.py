@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
 import typer
 
+from agentscope.analytics.filters import current_local_utc_offset_minutes
 from agentscope.cli import app
-from agentscope.codex_account.collector import sync_account_usage
+from agentscope.codex_account.app_server import CodexAppServerClient
+from agentscope.codex_account.collector import (
+    select_local_codex_threads,
+    sync_account_usage,
+    sync_thread_usage,
+)
 from agentscope.codex_account.storage import CodexAccountStorage
 from agentscope.config import AgentScopeConfig
 from agentscope.storage.database import Database
@@ -25,6 +32,17 @@ def _repository(database: Path) -> Repository:
     db = Database(database)
     db.initialize()
     return Repository(db)
+
+
+def _optional_date(value: str | None, option_name: str) -> date | None:
+    if value is None:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise typer.BadParameter(
+            f"Data inválida em {option_name}: {value}. Use YYYY-MM-DD."
+        ) from exc
 
 
 def _status_payload(storage: CodexAccountStorage) -> dict[str, object]:
@@ -82,16 +100,40 @@ def codex_account_sync(
     database: Optional[Path] = typer.Option(None, "--database"),
     codex_bin: str = typer.Option("codex", "--codex-bin"),
     timeout_seconds: float = typer.Option(10.0, "--timeout-seconds", min=0.1),
+    threads: bool = typer.Option(False, "--threads"),
+    from_value: Optional[str] = typer.Option(None, "--from"),
+    to_value: Optional[str] = typer.Option(None, "--to"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     config = AgentScopeConfig.from_env(database_path=database)
     repo = _repository(config.database_path)
-    result = sync_account_usage(
-        repo,
+    from_date = _optional_date(from_value, "--from")
+    to_date = _optional_date(to_value, "--to")
+    if from_date is not None and to_date is not None and from_date > to_date:
+        raise typer.BadParameter("--from não pode ser posterior a --to.")
+
+    with CodexAppServerClient(
         codex_bin=codex_bin,
         timeout_seconds=timeout_seconds,
-    )
+    ) as client:
+        result = sync_account_usage(repo, client=client)
+        thread_summary = None
+        if result.status == "complete" and threads:
+            local_threads = select_local_codex_threads(
+                repo,
+                from_date,
+                to_date,
+                utc_offset_minutes=current_local_utc_offset_minutes(),
+            )
+            thread_summary = sync_thread_usage(
+                repo,
+                client=client,
+                thread_ids=local_threads,
+            )
+
     payload = asdict(result)
+    if thread_summary is not None:
+        payload["threads"] = asdict(thread_summary)
     if json_output:
         typer.echo(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
     else:
@@ -101,6 +143,13 @@ def codex_account_sync(
             f"credits_balance={result.credits_balance or 'unavailable'} "
             f"error_code={result.error_code or 'none'}"
         )
+        if thread_summary is not None:
+            typer.echo(
+                f"threads_requested={thread_summary.threads_requested} "
+                f"threads_synced={thread_summary.threads_synced} "
+                f"threads_unavailable={thread_summary.threads_unavailable} "
+                f"thread_errors={thread_summary.errors}"
+            )
     if result.status != "complete":
         raise typer.Exit(code=1)
 
