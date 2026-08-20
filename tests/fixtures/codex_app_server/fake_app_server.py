@@ -98,8 +98,18 @@ def _usage_result(thread_id: str | None) -> dict[str, object]:
     }
 
 
+def _usage_error(request_id: object, mode: str) -> None:
+    message = (
+        "failed to fetch token usage profile: HTTP 403 Bearer SECRET_SHOULD_NOT_LEAK"
+        if mode == "profile"
+        else "failed to fetch thread usage: HTTP 500 Bearer SECRET_SHOULD_NOT_LEAK"
+    )
+    _write({"id": request_id, "error": {"code": -32603, "message": message}})
+
+
 def main() -> None:
     hang = os.environ.get("FAKE_CODEX_HANG") == "1"
+    usage_error = os.environ.get("FAKE_CODEX_USAGE_ERROR")
     for raw in sys.stdin:
         if not raw.strip():
             continue
@@ -134,6 +144,9 @@ def main() -> None:
         elif method == "account/rateLimits/read":
             result = _limits_result()
         elif method == "account/usage/read":
+            if usage_error:
+                _usage_error(request_id, usage_error)
+                continue
             params = request.get("params")
             params_obj = params if isinstance(params, dict) else {}
             thread_id = params_obj.get("threadId")
