@@ -5,6 +5,7 @@ import queue
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -26,13 +27,7 @@ def discover_codex_binary(
     home: Path | None = None,
     platform: str | None = None,
 ) -> str | None:
-    """Resolve Codex without reading any authentication material.
-
-    Prefer an explicit/path-resolvable binary. On Windows, fall back to the
-    executable bundled with the official OpenAI VS Code extension because the
-    extension can be installed and authenticated even when `codex` is not on
-    PATH.
-    """
+    """Resolve Codex without reading any authentication material."""
     direct_path = Path(codex_bin).expanduser()
     if direct_path.is_file():
         return str(direct_path)
@@ -65,6 +60,55 @@ def discover_codex_binary(
         return None
 
     return str(max(candidates, key=lambda path: path.stat().st_mtime))
+
+
+def detect_codex_thread_usage_support(
+    codex_bin: str = "codex",
+    *,
+    timeout_seconds: float = 15.0,
+) -> bool | None:
+    """Inspect the installed app-server schema for `account/usage/read(threadId)`.
+
+    Returns True when the generated schema explicitly exposes `threadId`, False
+    when account usage exists but the thread parameter is absent, and None when
+    capability detection itself cannot be completed.
+    """
+    resolved = discover_codex_binary(codex_bin)
+    if resolved is None:
+        return None
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            completed = subprocess.run(
+                [
+                    resolved,
+                    "app-server",
+                    "generate-json-schema",
+                    "--out",
+                    str(output),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                check=False,
+            )
+            if completed.returncode != 0:
+                return None
+            found_account_usage = False
+            found_thread_id = False
+            for schema_file in output.rglob("*.json"):
+                text = schema_file.read_text(encoding="utf-8", errors="ignore")
+                if "account/usage/read" in text:
+                    found_account_usage = True
+                if "GetAccountTokenUsageParams" in text and "threadId" in text:
+                    found_thread_id = True
+            if found_thread_id:
+                return True
+            if found_account_usage:
+                return False
+            return None
+    except (OSError, subprocess.SubprocessError):
+        return None
 
 
 class CodexAppServerError(RuntimeError):
