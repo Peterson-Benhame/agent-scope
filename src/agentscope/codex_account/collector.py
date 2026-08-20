@@ -36,6 +36,7 @@ class ThreadSyncSummary:
     threads_synced: int
     threads_unavailable: int
     errors: int
+    thread_usage_supported: bool | None = True
 
 
 def _string_or_none(value: object) -> str | None:
@@ -227,10 +228,7 @@ def _map_thread_usage(
     raw_groups = usage_value.get("groups")
     groups = tuple(
         group
-        for group in (
-            _map_thread_group(value)
-            for value in raw_groups
-        )
+        for group in (_map_thread_group(value) for value in raw_groups)
         if group is not None
     ) if isinstance(raw_groups, list) else ()
     return CodexThreadUsageSnapshot(
@@ -252,7 +250,17 @@ def sync_thread_usage(
     *,
     client: object,
     thread_ids: Sequence[LocalCodexThread],
+    thread_usage_supported: bool | None = True,
 ) -> ThreadSyncSummary:
+    if thread_usage_supported is False:
+        return ThreadSyncSummary(
+            threads_requested=len(thread_ids),
+            threads_synced=0,
+            threads_unavailable=len(thread_ids),
+            errors=0,
+            thread_usage_supported=False,
+        )
+
     storage = CodexAccountStorage(repository.database)
     synced = 0
     unavailable = 0
@@ -276,4 +284,5 @@ def sync_thread_usage(
         threads_synced=synced,
         threads_unavailable=unavailable,
         errors=errors,
+        thread_usage_supported=thread_usage_supported,
     )
