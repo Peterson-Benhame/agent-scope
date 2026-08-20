@@ -56,7 +56,11 @@ def test_codex_account_status_reads_only_stored_snapshot(tmp_path):
 
 
 def test_codex_account_sync_exposes_historical_thread_flags():
-    result = runner.invoke(app, ["codex-account", "sync", "--help"])
+    result = runner.invoke(
+        app,
+        ["codex-account", "sync", "--help"],
+        color=False,
+    )
     assert result.exit_code == 0, result.output
     assert "--threads" in result.stdout
     assert "--from" in result.stdout
