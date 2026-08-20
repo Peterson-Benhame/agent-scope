@@ -269,6 +269,50 @@
     return article;
   }
 
+  function renderModelBreakdownChart(rows) {
+    const article = chartCard('Uso por modelo');
+    const top = rows.slice(0, 8);
+    if (!top.length) return emptyChart(article);
+    const max = Math.max(...top.map((row) => row.totalTokens), 0);
+    if (max === 0) return emptyChart(article, 'Nenhum token registrado nesta seleção.');
+
+    const list = document.createElement('div');
+    list.className = 'breakdown-list';
+    top.forEach((row) => {
+      const item = document.createElement('div');
+      item.className = 'breakdown-row';
+      const header = document.createElement('div');
+      header.className = 'breakdown-header';
+      const label = document.createElement('span');
+      label.textContent = row.label;
+      const value = document.createElement('strong');
+      value.textContent = `${integerFormatter.format(row.totalTokens)} tokens`;
+      header.append(label, value);
+
+      const cost = document.createElement('div');
+      cost.className = 'breakdown-details';
+      if (typeof row.estimatedCostUsd === 'number' && Number.isFinite(row.estimatedCostUsd)) {
+        cost.textContent = `US$ ${usdFormatter.format(row.estimatedCostUsd)} · ${row.costLabel}`;
+      } else {
+        const coverage = row.costEventsTotal > 0
+          ? ` · cobertura ${row.costEventsPriced}/${row.costEventsTotal}`
+          : '';
+        cost.textContent = `${row.costLabel} não disponível${coverage}`;
+      }
+
+      const track = document.createElement('div');
+      track.className = 'bar-track';
+      const bar = document.createElement('span');
+      bar.className = 'bar-fill';
+      bar.style.width = `${Math.max(2, (row.totalTokens / max) * 100)}%`;
+      track.appendChild(bar);
+      item.append(header, cost, track);
+      list.appendChild(item);
+    });
+    article.appendChild(list);
+    return article;
+  }
+
   function renderCharts(vm) {
     trends.replaceChildren();
     breakdowns.replaceChildren();
@@ -284,7 +328,7 @@
     );
     breakdowns.append(
       renderBreakdownChart('Uso por projeto', vm.breakdowns.projects),
-      renderBreakdownChart('Uso por modelo', vm.breakdowns.models),
+      renderModelBreakdownChart(vm.breakdowns.models),
       renderBreakdownChart('Uso por fonte', vm.breakdowns.sources),
     );
   }
