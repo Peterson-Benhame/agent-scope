@@ -64,16 +64,43 @@ def discover_codex_binary(
     if not candidates:
         return None
 
-    # Extension upgrades can leave older versions installed. Prefer the most
-    # recently modified bundled executable instead of relying on version-name
-    # lexical ordering.
     return str(max(candidates, key=lambda path: path.stat().st_mtime))
 
 
 class CodexAppServerError(RuntimeError):
-    def __init__(self, code: str, message: str | None = None):
+    def __init__(
+        self,
+        code: str,
+        message: str | None = None,
+        *,
+        rpc_code: int | None = None,
+    ) -> None:
         self.code = code
+        self.rpc_code = rpc_code
         super().__init__(message or code)
+
+
+def _safe_remote_error_code(
+    method: str,
+    params: dict[str, object] | None,
+    error: object,
+) -> tuple[str, int | None]:
+    error_obj = error if isinstance(error, dict) else {}
+    rpc_code = error_obj.get("code")
+    rpc_code_value = rpc_code if isinstance(rpc_code, int) else None
+    message = error_obj.get("message")
+    message_value = message.lower() if isinstance(message, str) else ""
+
+    if method == "account/usage/read":
+        if "token usage profile" in message_value:
+            return "token_usage_profile_failed", rpc_code_value
+        if "thread usage" in message_value:
+            return "thread_usage_backend_failed", rpc_code_value
+        if params and params.get("threadId") is not None:
+            return "thread_usage_remote_error", rpc_code_value
+        return "token_usage_remote_error", rpc_code_value
+
+    return "remote_error", rpc_code_value
 
 
 class CodexAppServerClient:
@@ -111,10 +138,7 @@ class CodexAppServerClient:
         else:
             resolved = discover_codex_binary(self.codex_bin)
             if resolved is None:
-                raise CodexAppServerError(
-                    "codex_not_found",
-                    "codex_not_found",
-                )
+                raise CodexAppServerError("codex_not_found", "codex_not_found")
             command = [resolved, "app-server", "--stdio"]
         try:
             self._process = subprocess.Popen(
@@ -128,10 +152,7 @@ class CodexAppServerClient:
                 shell=False,
             )
         except FileNotFoundError as exc:
-            raise CodexAppServerError(
-                "codex_not_found",
-                "codex_not_found",
-            ) from exc
+            raise CodexAppServerError("codex_not_found", "codex_not_found") from exc
         except OSError as exc:
             raise CodexAppServerError(
                 "process_start_failed",
@@ -241,7 +262,16 @@ class CodexAppServerClient:
             if message.get("id") != request_id:
                 continue
             if "error" in message:
-                raise CodexAppServerError("remote_error", "remote_error")
+                safe_code, rpc_code = _safe_remote_error_code(
+                    method,
+                    params,
+                    message.get("error"),
+                )
+                raise CodexAppServerError(
+                    safe_code,
+                    safe_code,
+                    rpc_code=rpc_code,
+                )
             result = message.get("result")
             if not isinstance(result, dict):
                 raise CodexAppServerError("invalid_response", "invalid_response")
