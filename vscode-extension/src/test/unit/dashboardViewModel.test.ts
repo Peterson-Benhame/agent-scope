@@ -46,7 +46,23 @@ const snapshot: ExtensionSnapshot = {
   },
   breakdowns: {
     projects: [{ project: 'S584', sessions: 2, total_tokens: 1200 }],
-    models: [{ model: 'gpt-5.6-sol', sessions: 2, total_tokens: 1200 }],
+    models: [{
+      model: 'gpt-5.6-sol',
+      sessions: 2,
+      total_tokens: 1200,
+      estimated_cost_usd: 1.25,
+      cost_events_total: 4,
+      cost_events_priced: 4,
+      cost_complete: true,
+    }, {
+      model: 'codex-auto-review',
+      sessions: 1,
+      total_tokens: 42,
+      estimated_cost_usd: null,
+      cost_events_total: 1,
+      cost_events_priced: 0,
+      cost_complete: false,
+    }],
     sources: [{ source: 'codex', sessions: 2, total_tokens: 1200 }],
   },
   dimensions: { projects: [], models: [], sources: [], users: [], machines: [] },
@@ -145,6 +161,31 @@ describe('dashboard view model', () => {
       label: 'codex',
       sessions: 2,
       totalTokens: 1200,
+    });
+  });
+
+  it('maps model cost coverage and billing label', () => {
+    const vm = toDashboardViewModel(snapshot, { period: '7d' });
+
+    assert.deepStrictEqual(vm.breakdowns.models[0], {
+      label: 'gpt-5.6-sol',
+      sessions: 2,
+      totalTokens: 1200,
+      estimatedCostUsd: 1.25,
+      costEventsTotal: 4,
+      costEventsPriced: 4,
+      costComplete: true,
+      costLabel: 'Equivalente API',
+    });
+    assert.deepStrictEqual(vm.breakdowns.models[1], {
+      label: 'codex-auto-review',
+      sessions: 1,
+      totalTokens: 42,
+      estimatedCostUsd: null,
+      costEventsTotal: 1,
+      costEventsPriced: 0,
+      costComplete: false,
+      costLabel: 'Equivalente API',
     });
   });
 
