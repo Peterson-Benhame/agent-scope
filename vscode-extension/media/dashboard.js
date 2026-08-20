@@ -313,6 +313,52 @@
     return article;
   }
 
+  function clientDisplayName(value) {
+    const labels = {
+      vscode: 'VS Code',
+      cli: 'CLI',
+      app: 'App',
+      web: 'Web',
+      unknown: 'Unknown',
+    };
+    return labels[value] || value;
+  }
+
+  function renderClientBreakdownChart(rows) {
+    const article = chartCard('Uso por cliente/origem');
+    const top = rows.slice(0, 8);
+    if (!top.length) return emptyChart(article);
+
+    const list = document.createElement('div');
+    list.className = 'breakdown-list';
+    top.forEach((row) => {
+      const item = document.createElement('div');
+      item.className = 'breakdown-row';
+      const header = document.createElement('div');
+      header.className = 'breakdown-header';
+      const label = document.createElement('span');
+      label.textContent = clientDisplayName(row.label);
+      const value = document.createElement('strong');
+      value.textContent = `${integerFormatter.format(row.totalTokens)} tokens · ${row.shareLabel}`;
+      header.append(label, value);
+
+      const details = document.createElement('div');
+      details.className = 'breakdown-details';
+      details.textContent = `${integerFormatter.format(row.sessions)} ${row.sessions === 1 ? 'sessão' : 'sessões'}`;
+
+      const track = document.createElement('div');
+      track.className = 'bar-track';
+      const bar = document.createElement('span');
+      bar.className = 'bar-fill';
+      bar.style.width = `${Math.max(2, row.share * 100)}%`;
+      track.appendChild(bar);
+      item.append(header, details, track);
+      list.appendChild(item);
+    });
+    article.appendChild(list);
+    return article;
+  }
+
   function renderCharts(vm) {
     trends.replaceChildren();
     breakdowns.replaceChildren();
@@ -330,6 +376,7 @@
       renderBreakdownChart('Uso por projeto', vm.breakdowns.projects),
       renderModelBreakdownChart(vm.breakdowns.models),
       renderBreakdownChart('Uso por fonte', vm.breakdowns.sources),
+      renderClientBreakdownChart(vm.breakdowns.clients),
     );
   }
 
