@@ -178,3 +178,92 @@ class CodexAccountStorage:
             attribution_confidence=AttributionConfidence(str(row["attribution_confidence"])),
             evidence_json=str(row["evidence_json"]),
         )
+
+    def attribution_context(self, thread_snapshot_id: int):
+        with self.database.connect() as conn:
+            return conn.execute(
+                """
+                SELECT
+                    t.id AS thread_snapshot_id,
+                    t.captured_at AS thread_captured_at,
+                    t.session_id,
+                    s.started_at AS session_started_at,
+                    s.ended_at AS session_ended_at,
+                    (
+                        SELECT MAX(tu.timestamp)
+                        FROM token_usage tu
+                        WHERE tu.session_id=s.id
+                    ) AS last_usage_at
+                FROM codex_thread_usage_snapshots t
+                LEFT JOIN sessions s ON s.id=t.session_id
+                WHERE t.id=?
+                """,
+                (thread_snapshot_id,),
+            ).fetchone()
+
+    def account_snapshot_before(self, timestamp: str):
+        with self.database.connect() as conn:
+            return conn.execute(
+                """
+                SELECT * FROM codex_account_usage_snapshots
+                WHERE status='complete' AND captured_at <= ?
+                ORDER BY captured_at DESC, id DESC
+                LIMIT 1
+                """,
+                (timestamp,),
+            ).fetchone()
+
+    def account_snapshot_after(self, timestamp: str):
+        with self.database.connect() as conn:
+            return conn.execute(
+                """
+                SELECT * FROM codex_account_usage_snapshots
+                WHERE status='complete' AND captured_at >= ?
+                ORDER BY captured_at ASC, id ASC
+                LIMIT 1
+                """,
+                (timestamp,),
+            ).fetchone()
+
+    def count_overlapping_codex_sessions(self, start_at: str, end_at: str) -> int:
+        with self.database.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM sessions s
+                JOIN sources src ON src.id=s.source_id
+                WHERE src.name='codex'
+                  AND s.started_at IS NOT NULL
+                  AND s.started_at <= ?
+                  AND COALESCE(
+                        s.ended_at,
+                        (SELECT MAX(tu.timestamp) FROM token_usage tu WHERE tu.session_id=s.id),
+                        s.started_at
+                      ) >= ?
+                """,
+                (end_at, start_at),
+            ).fetchone()
+        return int(row[0])
+
+    def update_thread_attribution(
+        self,
+        thread_snapshot_id: int,
+        *,
+        billing_source: BillingSource,
+        confidence: AttributionConfidence,
+        evidence_json: str,
+    ) -> None:
+        with self.database.connect() as conn:
+            conn.execute(
+                """
+                UPDATE codex_thread_usage_snapshots
+                SET billing_source=?, attribution_confidence=?, evidence_json=?
+                WHERE id=?
+                """,
+                (
+                    billing_source.value,
+                    confidence.value,
+                    evidence_json,
+                    thread_snapshot_id,
+                ),
+            )
