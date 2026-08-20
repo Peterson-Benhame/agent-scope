@@ -18,6 +18,7 @@ from agentscope.extension.contracts import (
     to_dict,
 )
 from agentscope.storage.repository import Repository
+from agentscope.usage_context import ensure_usage_context_schema
 
 
 def _dimension_values(repository: Repository, table: str, expression: str) -> list[str]:
@@ -207,6 +208,7 @@ def build_extension_snapshot(
     period: str | None,
     database_path: Path,
 ) -> dict[str, object]:
+    ensure_usage_context_schema(repository)
     dashboard = DashboardAnalyticsService(repository, filters)
     summary = dashboard.summary()
     quality = dashboard.data_quality()
