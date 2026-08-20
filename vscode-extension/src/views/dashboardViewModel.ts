@@ -45,6 +45,11 @@ export interface DashboardModelBreakdownPoint extends DashboardBreakdownPoint {
   costLabel: string;
 }
 
+export interface DashboardClientBreakdownPoint extends DashboardBreakdownPoint {
+  share: number;
+  shareLabel: string;
+}
+
 export interface DashboardViewModel {
   generatedAt: string;
   database: string;
@@ -59,6 +64,7 @@ export interface DashboardViewModel {
     projects: DashboardBreakdownPoint[];
     models: DashboardModelBreakdownPoint[];
     sources: DashboardBreakdownPoint[];
+    clients: DashboardClientBreakdownPoint[];
   };
 }
 
@@ -209,6 +215,13 @@ export function toDashboardViewModel(
         label: row.source,
         sessions: row.sessions,
         totalTokens: row.total_tokens,
+      })),
+      clients: snapshot.breakdowns.clients.map((row) => ({
+        label: row.client,
+        sessions: row.sessions,
+        totalTokens: row.total_tokens,
+        share: row.share,
+        shareLabel: formatPercent(row.share),
       })),
     },
   };
