@@ -122,36 +122,60 @@ function metric(
 }
 
 function costLabel(snapshot: ExtensionSnapshot): string {
-  return snapshot.billing.mode === 'api' ? 'Custo estimado API' : 'Equivalente API';
+  return snapshot.billing.mode === 'api'
+    ? 'Custo estimado API'
+    : 'Custo equivalente via API';
 }
 
 function estimatedCostMetric(snapshot: ExtensionSnapshot): DashboardMetric {
-  const base = metric(
-    formatUsd(snapshot.summary.estimated_cost_usd),
-    snapshot.availability.estimated_cost,
-  );
+  const summary = snapshot.summary;
+  const exactCost = summary.estimated_cost_usd;
+  const knownCost = summary.known_estimated_cost_usd ?? exactCost;
+  const displayCost = exactCost ?? knownCost;
   const label = costLabel(snapshot);
-  let billingNote: string;
+  const totalEvents = summary.estimated_cost_events_total;
+  const pricedEvents = summary.estimated_cost_events_priced;
+  const coverage = summary.estimated_cost_coverage;
+  const complete = summary.estimated_cost_complete;
+  const hasCoverage =
+    typeof totalEvents === 'number' &&
+    typeof pricedEvents === 'number' &&
+    typeof coverage === 'number' &&
+    typeof complete === 'boolean';
 
+  let coverageNote: string | undefined;
+  if (hasCoverage && totalEvents > 0) {
+    const status = complete ? 'Estimativa completa' : 'Estimativa parcial';
+    coverageNote = `${status}. Cobertura: ${formatInteger(pricedEvents)} de ${formatInteger(totalEvents)} eventos · ${formatPercent(coverage)}.`;
+  }
+
+  let billingNote: string;
   switch (snapshot.billing.mode) {
     case 'api':
       billingNote = 'Estimativa baseada em tokens e preços da API; não é cobrança observada.';
       break;
     case 'chatgpt_codex_plan':
-      billingNote = 'Uso identificado como plano ChatGPT/Codex; o valor é referência pelos preços da API e não representa gasto real.';
+      billingNote = 'Uso identificado como plano ChatGPT/Codex; mostra quanto o mesmo consumo custaria pelos preços da API e não representa gasto real.';
       break;
     case 'mixed':
-      billingNote = 'O período contém mais de uma forma de cobrança; o valor é referência pelos preços da API e não representa gasto real.';
+      billingNote = 'O período contém mais de uma forma de cobrança; o valor usa preços da API como referência e não representa gasto real.';
       break;
     default:
       billingNote = 'Forma de cobrança não identificada; o valor usa preços da API como referência e não representa gasto real.';
       break;
   }
 
+  const unavailableReason = displayCost === null
+    ? snapshot.availability.estimated_cost.reason
+    : null;
+  const unavailableNote = unavailableReason
+    ? availabilityCopy[unavailableReason]
+    : undefined;
+
   return {
     label,
-    value: base.value,
-    subtitle: [base.subtitle, billingNote].filter(Boolean).join(' '),
+    value: formatUsd(displayCost),
+    subtitle: [coverageNote, unavailableNote, billingNote].filter(Boolean).join(' '),
   };
 }
 
