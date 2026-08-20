@@ -4,9 +4,9 @@ import json
 
 from typer.testing import CliRunner
 
-from agentscope.cli import app
 from agentscope.codex_account.models import CodexAccountSnapshot
 from agentscope.codex_account.storage import CodexAccountStorage
+from agentscope.entrypoint import app
 from agentscope.storage.database import Database
 
 
