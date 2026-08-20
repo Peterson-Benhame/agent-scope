@@ -73,6 +73,10 @@ export interface ModelBreakdown {
   model: string;
   sessions: number;
   total_tokens: number;
+  estimated_cost_usd: number | null;
+  cost_events_total: number;
+  cost_events_priced: number;
+  cost_complete: boolean;
 }
 
 export interface SourceBreakdown {
@@ -221,6 +225,31 @@ function validateBreakdown(value: unknown, labelKey: string): void {
   }
 }
 
+function validateModelBreakdown(value: unknown): void {
+  if (!Array.isArray(value)) invalid('Snapshot model breakdown is invalid.');
+  for (const item of value) {
+    if (
+      !isRecord(item) ||
+      typeof item.model !== 'string' ||
+      !isFiniteNumber(item.sessions) ||
+      !isFiniteNumber(item.total_tokens) ||
+      !isNumberOrNull(item.estimated_cost_usd) ||
+      !isFiniteNumber(item.cost_events_total) ||
+      !isFiniteNumber(item.cost_events_priced) ||
+      typeof item.cost_complete !== 'boolean'
+    ) {
+      invalid('Snapshot model breakdown is invalid.');
+    }
+    if (
+      item.cost_events_total < 0 ||
+      item.cost_events_priced < 0 ||
+      item.cost_events_priced > item.cost_events_total
+    ) {
+      invalid('Snapshot model cost coverage is invalid.');
+    }
+  }
+}
+
 function validateFreshness(value: unknown): void {
   if (!isRecord(value)) invalid('Snapshot freshness is invalid.');
   if (
@@ -275,7 +304,7 @@ export function parseExtensionSnapshot(value: unknown): ExtensionSnapshot {
   validateAvailabilityItem(value.availability.estimated_savings);
   validateDaily(value.series.daily);
   validateBreakdown(value.breakdowns.projects, 'project');
-  validateBreakdown(value.breakdowns.models, 'model');
+  validateModelBreakdown(value.breakdowns.models);
   validateBreakdown(value.breakdowns.sources, 'source');
 
   const dimensions = value.dimensions;
