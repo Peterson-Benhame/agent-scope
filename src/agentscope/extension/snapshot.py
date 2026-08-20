@@ -218,6 +218,14 @@ def build_extension_snapshot(
 
     observed_cost = summary.observed_cost_usd
     estimated_cost = summary.estimated_raw_cost_usd
+    known_estimated_cost = summary.known_estimated_raw_cost_usd
+    estimated_cost_events_total = summary.estimated_cost_events_total
+    estimated_cost_events_priced = summary.estimated_cost_events_priced
+    estimated_cost_coverage = (
+        estimated_cost_events_priced / estimated_cost_events_total
+        if estimated_cost_events_total
+        else 0.0
+    )
     estimated_savings = (
         summary.total_savings_usd
         if _has_savings_evidence(repository, filters)
@@ -254,6 +262,11 @@ def build_extension_snapshot(
                 cache_ratio=summary.cache_ratio if summary.input_tokens else None,
                 observed_cost_usd=observed_cost,
                 estimated_cost_usd=estimated_cost,
+                known_estimated_cost_usd=known_estimated_cost,
+                estimated_cost_events_total=estimated_cost_events_total,
+                estimated_cost_events_priced=estimated_cost_events_priced,
+                estimated_cost_coverage=estimated_cost_coverage,
+                estimated_cost_complete=summary.estimated_cost_complete,
                 estimated_savings_usd=estimated_savings,
             )
         ),
