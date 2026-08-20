@@ -206,12 +206,18 @@ class DashboardAnalyticsService(AnalyticsService):
 
     def by_model(self) -> list[dict[str, Any]]:
         where, params = self._usage_where("tu.timestamp")
+        model_expression = "COALESCE(tm.name, sm.name, '(unknown)')"
         with self.repository.database.connect() as conn:
             rows = conn.execute(
-                """
-                SELECT COALESCE(tm.name, sm.name, '(unknown)') AS model,
+                f"""
+                SELECT {model_expression} AS model,
                        COUNT(DISTINCT s.id) AS sessions,
-                       COALESCE(SUM(tu.total_tokens), 0) AS total_tokens
+                       COALESCE(SUM(tu.total_tokens), 0) AS total_tokens,
+                       COUNT(*) AS cost_events_total,
+                       COALESCE(SUM(
+                           CASE WHEN ec.estimated_raw_cost_usd IS NOT NULL THEN 1 ELSE 0 END
+                       ), 0) AS cost_events_priced,
+                       SUM(ec.estimated_raw_cost_usd) AS known_estimated_cost_usd
                 FROM token_usage tu
                 JOIN sessions s ON s.id=tu.session_id
                 LEFT JOIN projects p ON p.id=s.project_id
@@ -220,13 +226,35 @@ class DashboardAnalyticsService(AnalyticsService):
                 JOIN sources src ON src.id=s.source_id
                 LEFT JOIN users u ON u.id=s.user_id
                 LEFT JOIN machines mc ON mc.id=s.machine_id
-                """ + where + """
-                GROUP BY COALESCE(tm.name, sm.name, '(unknown)')
+                LEFT JOIN costs ec
+                  ON ec.event_key='token_usage_cost:' || CAST(tu.id AS TEXT)
+                """ + where + f"""
+                GROUP BY {model_expression}
                 ORDER BY total_tokens DESC, model
                 """,
                 params,
             ).fetchall()
-        return [dict(row) for row in rows]
+
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            total = int(row["cost_events_total"] or 0)
+            priced = int(row["cost_events_priced"] or 0)
+            complete = total > 0 and priced == total
+            known = row["known_estimated_cost_usd"]
+            result.append(
+                {
+                    "model": str(row["model"]),
+                    "sessions": int(row["sessions"] or 0),
+                    "total_tokens": int(row["total_tokens"] or 0),
+                    "estimated_cost_usd": (
+                        float(known) if complete and known is not None else None
+                    ),
+                    "cost_events_total": total,
+                    "cost_events_priced": priced,
+                    "cost_complete": complete,
+                }
+            )
+        return result
 
     def by_source(self) -> list[dict[str, Any]]:
         where, params = self._usage_where("tu.timestamp")
