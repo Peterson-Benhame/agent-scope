@@ -1,0 +1,65 @@
+.codex-account {
+  margin-top: 16px;
+}
+
+.codex-account:empty {
+  display: none;
+}
+
+.codex-account-card {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--vscode-panel-border, var(--vscode-input-border));
+  border-radius: 10px;
+  background: var(--vscode-sideBarSectionHeader-background);
+}
+
+.codex-account-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.codex-account-header h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.codex-account-header span,
+.codex-account-label,
+.codex-account-hint {
+  color: var(--vscode-descriptionForeground);
+}
+
+.codex-account-header span,
+.codex-account-hint {
+  font-size: 0.85em;
+}
+
+.codex-account-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+}
+
+.codex-account-detail {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.codex-account-value {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 520px) {
+  .codex-account-grid {
+    grid-template-columns: 1fr;
+  }
+}
