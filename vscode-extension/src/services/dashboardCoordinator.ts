@@ -63,6 +63,23 @@ export class DashboardCoordinator {
     }
   }
 
+  async refreshDerived(): Promise<void> {
+    this.dashboard.setLoading();
+    try {
+      const result = await this.client().refreshDerivedData();
+      this.output.appendLine(
+        `[DERIVED_REFRESH] context_updated=${String(result.context.sessions_updated ?? 'unknown')} ` +
+        `events_priced=${String(result.costs.events_priced ?? 'unknown')} ` +
+        `events_unpriced=${String(result.costs.events_unpriced ?? 'unknown')}`,
+      );
+      await this.refresh();
+    } catch (error) {
+      const mapped = this.mapError(error);
+      this.output.appendLine(`[${mapped.code}] ${mapped.detail}`);
+      this.dashboard.showError(mapped.code, mapped.message);
+    }
+  }
+
   async syncCodex(): Promise<void> {
     this.dashboard.setCodexSyncing();
     try {
