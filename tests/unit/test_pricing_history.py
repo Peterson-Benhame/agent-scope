@@ -32,7 +32,7 @@ def test_official_history_tracks_launch_and_july_30_price_change(tmp_path):
     inserted = install_official_openai_history(repo)
     second = install_official_openai_history(repo)
 
-    assert inserted == 10
+    assert inserted == 18
     assert second == 0
 
     catalog = PricingCatalog(repo)
