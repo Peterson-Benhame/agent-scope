@@ -11,6 +11,10 @@ OPENAI_API_STANDARD_SCOPE = "openai_api_standard"
 _OBSERVED_ON = date(2026, 8, 19)
 _SOURCE_VERSION = "openai-api-standard-observed-2026-08-19"
 _MODEL_PAGE_URLS = {
+    "gpt-5.3-codex": "https://developers.openai.com/api/docs/models/gpt-5.3-codex",
+    "gpt-5.4": "https://developers.openai.com/api/docs/models/gpt-5.4",
+    "gpt-5.4-mini": "https://developers.openai.com/api/docs/models/gpt-5.4-mini",
+    "gpt-5.5": "https://developers.openai.com/api/docs/models/gpt-5.5",
     "gpt-5.6-sol": "https://developers.openai.com/api/docs/models/gpt-5.6-sol.md",
     "gpt-5.6-terra": "https://developers.openai.com/api/docs/models/gpt-5.6-terra.md",
     "gpt-5.6-luna": "https://developers.openai.com/api/docs/models/gpt-5.6-luna.md",
@@ -217,7 +221,7 @@ def _context_rows(
     input_price: float,
     cached_price: float,
     output_price: float,
-) -> tuple[tuple[str, str, float, float, float, float], ...]:
+) -> tuple[tuple[str, str, float, float, float | None, float], ...]:
     cache_write = input_price * 1.25
     return (
         (model, "short", input_price, cached_price, cache_write, output_price),
@@ -232,10 +236,27 @@ def _context_rows(
     )
 
 
+def _flat_context_rows(
+    model: str,
+    input_price: float,
+    cached_price: float,
+    output_price: float,
+    *,
+    long_context_uplift: bool,
+) -> tuple[tuple[str, str, float, float, float | None, float], ...]:
+    long_input = input_price * 2.0 if long_context_uplift else input_price
+    long_cached = cached_price * 2.0 if long_context_uplift else cached_price
+    long_output = output_price * 1.5 if long_context_uplift else output_price
+    return (
+        (model, "short", input_price, cached_price, None, output_price),
+        (model, "long", long_input, long_cached, None, long_output),
+    )
+
+
 def _install_history_rows(
     repository: Repository,
     *,
-    rows: tuple[tuple[str, str, float, float, float, float], ...],
+    rows: tuple[tuple[str, str, float, float, float | None, float], ...],
     valid_from: date,
     valid_to: date | None,
     source_url: str,
@@ -266,8 +287,66 @@ def _install_history_rows(
     return inserted
 
 
+def _install_current_model_history(repository: Repository) -> int:
+    models = (
+        (
+            "gpt-5.3-codex",
+            1.75,
+            0.175,
+            14.0,
+            date(2026, 2, 5),
+            False,
+            "openai-gpt-5.3-codex-api-pricing-2026-08-21",
+        ),
+        (
+            "gpt-5.4",
+            2.50,
+            0.25,
+            15.0,
+            date(2026, 3, 5),
+            True,
+            "openai-gpt-5.4-api-pricing-2026-03-05",
+        ),
+        (
+            "gpt-5.4-mini",
+            0.75,
+            0.075,
+            4.50,
+            date(2026, 3, 17),
+            False,
+            "openai-gpt-5.4-mini-api-pricing-2026-03-17",
+        ),
+        (
+            "gpt-5.5",
+            5.0,
+            0.50,
+            30.0,
+            date(2026, 4, 24),
+            True,
+            "openai-gpt-5.5-api-pricing-2026-04-24",
+        ),
+    )
+    inserted = 0
+    for model, input_price, cached_price, output_price, valid_from, uplift, version in models:
+        inserted += _install_history_rows(
+            repository,
+            rows=_flat_context_rows(
+                model,
+                input_price,
+                cached_price,
+                output_price,
+                long_context_uplift=uplift,
+            ),
+            valid_from=valid_from,
+            valid_to=None,
+            source_url=_MODEL_PAGE_URLS[model],
+            source_version=version,
+        )
+    return inserted
+
+
 def install_official_openai_history(repository: Repository) -> int:
-    """Install provider-declared GPT-5.6 API prices with their effective dates."""
+    """Install provider-declared OpenAI API prices with their effective dates."""
     pre_reduction_rows = (
         *_context_rows("gpt-5.6-terra", 2.50, 0.25, 15.0),
         *_context_rows("gpt-5.6-luna", 1.0, 0.10, 6.0),
@@ -276,7 +355,8 @@ def install_official_openai_history(repository: Repository) -> int:
         *_context_rows("gpt-5.6-terra", 2.0, 0.20, 12.0),
         *_context_rows("gpt-5.6-luna", 0.20, 0.02, 1.20),
     )
-    inserted = _install_history_rows(
+    inserted = _install_current_model_history(repository)
+    inserted += _install_history_rows(
         repository,
         rows=_context_rows("gpt-5.6-sol", 5.0, 0.50, 30.0),
         valid_from=date(2026, 7, 9),
