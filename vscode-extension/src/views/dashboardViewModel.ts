@@ -2,6 +2,7 @@ import {
   AvailabilityItem,
   AvailabilityReason,
   ExtensionSnapshot,
+  SnapshotCodexAccount,
   SnapshotFilters,
 } from '../contracts/snapshot';
 
@@ -19,6 +20,17 @@ export interface DashboardCards {
   observedCost: DashboardMetric;
   estimatedCost: DashboardMetric;
   estimatedSavings: DashboardMetric;
+}
+
+export interface DashboardCodexAccount {
+  title: string;
+  syncedAtLabel: string;
+  primaryUsageLabel: string;
+  secondaryUsageLabel: string;
+  creditBalanceLabel: string;
+  primaryResetLabel?: string;
+  secondaryResetLabel?: string;
+  spendControlLabel?: string;
 }
 
 export interface DashboardDailyPoint {
@@ -57,6 +69,7 @@ export interface DashboardViewModel {
   filters: SnapshotFilters;
   isEmpty: boolean;
   cards: DashboardCards;
+  codexAccount?: DashboardCodexAccount;
   dimensions: ExtensionSnapshot['dimensions'];
   quality: ExtensionSnapshot['quality'];
   series: { daily: DashboardDailyPoint[] };
@@ -86,6 +99,14 @@ function formatPercent(value: number | null): string {
   }).format(value * 100)}%`;
 }
 
+function formatPercentPoints(value: number | null | undefined): string {
+  if (value === null || value === undefined) return 'Não disponível';
+  return `${new Intl.NumberFormat('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)}%`;
+}
+
 function formatUsd(value: number | null): string {
   if (value === null) return 'Não disponível';
   return `US$ ${new Intl.NumberFormat('pt-BR', {
@@ -94,18 +115,27 @@ function formatUsd(value: number | null): string {
   }).format(value)}`;
 }
 
-function lastImportedLabel(snapshot: ExtensionSnapshot): string {
-  const freshness = snapshot.freshness;
-  if (!freshness?.last_imported_at) return 'Última coleta: não disponível';
-  const raw = freshness.last_imported_at;
+function formatDateTime(raw: string | null | undefined): string {
+  if (!raw) return 'não disponível';
   const normalized = raw.includes('T') ? raw : `${raw.replace(' ', 'T')}Z`;
   const parsed = new Date(normalized);
-  const formatted = Number.isNaN(parsed.getTime())
+  return Number.isNaN(parsed.getTime())
     ? raw
     : new Intl.DateTimeFormat('pt-BR', {
         dateStyle: 'short',
         timeStyle: 'short',
       }).format(parsed);
+}
+
+function formatEpochSeconds(value: number | null | undefined): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  return formatDateTime(new Date(value * 1000).toISOString());
+}
+
+function lastImportedLabel(snapshot: ExtensionSnapshot): string {
+  const freshness = snapshot.freshness;
+  if (!freshness?.last_imported_at) return 'Última coleta: não disponível';
+  const formatted = formatDateTime(freshness.last_imported_at);
   const artifactLabel = freshness.artifacts_tracked === 1 ? 'arquivo' : 'arquivos';
   return `Última coleta: ${formatted} · ${freshness.artifacts_tracked} ${artifactLabel}`;
 }
@@ -179,6 +209,47 @@ function estimatedCostMetric(snapshot: ExtensionSnapshot): DashboardMetric {
   };
 }
 
+function planDisplayName(planType: string | null | undefined): string {
+  if (!planType) return 'Plano não disponível';
+  const known: Record<string, string> = {
+    pro: 'ChatGPT Pro',
+    plus: 'ChatGPT Plus',
+  };
+  return known[planType.toLowerCase()] ?? planType;
+}
+
+function creditBalanceLabel(account: SnapshotCodexAccount): string {
+  if (account.credits?.unlimited === true) return 'Créditos ilimitados';
+  const raw = account.credits?.balance;
+  if (raw === null || raw === undefined) return 'Não disponível';
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return `${raw} créditos`;
+  return `${new Intl.NumberFormat('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value)} créditos`;
+}
+
+function codexAccountViewModel(
+  account: SnapshotCodexAccount | undefined,
+): DashboardCodexAccount | undefined {
+  if (!account?.available) return undefined;
+  return {
+    title: `Codex — ${planDisplayName(account.plan_type)}`,
+    syncedAtLabel: `Conta sincronizada: ${formatDateTime(account.captured_at)}`,
+    primaryUsageLabel: formatPercentPoints(account.primary_used_percent),
+    secondaryUsageLabel: formatPercentPoints(account.secondary_used_percent),
+    creditBalanceLabel: creditBalanceLabel(account),
+    primaryResetLabel: formatEpochSeconds(account.primary_resets_at),
+    secondaryResetLabel: formatEpochSeconds(account.secondary_resets_at),
+    spendControlLabel: account.spend_control_reached === true
+      ? 'Limite de gastos atingido'
+      : account.spend_control_reached === false
+        ? 'Limite de gastos não atingido'
+        : undefined,
+  };
+}
+
 export function toDashboardViewModel(
   snapshot: ExtensionSnapshot,
   filters: SnapshotFilters,
@@ -206,6 +277,7 @@ export function toDashboardViewModel(
         snapshot.availability.estimated_savings,
       ),
     },
+    codexAccount: codexAccountViewModel(snapshot.codex_account),
     dimensions: snapshot.dimensions,
     quality: snapshot.quality,
     series: {
