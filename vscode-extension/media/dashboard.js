@@ -28,6 +28,9 @@
 
   refresh.addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
   selectDatabase.addEventListener('click', () => vscode.postMessage({ type: 'selectDatabase' }));
+  window.addEventListener('agentscope:syncCodex', () => {
+    vscode.postMessage({ type: 'syncCodex' });
+  });
 
   function button(label, action, active) {
     const element = document.createElement('button');
