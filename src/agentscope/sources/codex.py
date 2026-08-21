@@ -12,6 +12,10 @@ from agentscope.sources.base import (
     SourceDiscovery,
 )
 from agentscope.storage.repository import Repository
+from agentscope.usage_context import (
+    infer_codex_usage_context,
+    persist_session_usage_context,
+)
 
 
 def _hash_file(path: Path) -> str:
@@ -61,9 +65,51 @@ def _tool_category(name: str) -> str:
     return "other"
 
 
+def _has_source_reported_usage(repository: Repository, session_id: int) -> bool:
+    with repository.database.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM token_usage
+            WHERE session_id=? AND token_source='source_reported'
+            LIMIT 1
+            """,
+            (session_id,),
+        ).fetchone()
+    return row is not None
+
+
+def _delete_fallback_usage(repository: Repository, session_id: int) -> None:
+    with repository.database.connect() as conn:
+        conn.execute(
+            "DELETE FROM token_usage WHERE session_id=? AND token_source='tiktoken_estimate'",
+            (session_id,),
+        )
+
+
+def _insert_token_usage(
+    repository: Repository,
+    session_id: int,
+    turn_id: int | None,
+    usage,
+) -> int:
+    usage_id = repository.insert_token_usage(session_id, turn_id, usage)
+    with repository.database.connect() as conn:
+        conn.execute(
+            "UPDATE token_usage SET token_source=? WHERE id=?",
+            (usage.token_source, usage_id),
+        )
+    return usage_id
+
+
 def _import_rollout(repository: Repository, path: Path) -> int:
     data = collect_codex_rollout(path)
     session_id = repository.upsert_session(data.session)
+    persist_session_usage_context(
+        repository,
+        session_id,
+        infer_codex_usage_context(data.session),
+    )
     turn_ids: dict[str, int] = {}
     for turn in data.turns:
         turn_ids[turn.external_turn_id] = repository.upsert_turn(session_id, turn)
@@ -80,8 +126,19 @@ def _import_rollout(repository: Repository, path: Path) -> int:
             turn_ids.get(call.turn_external_id or ""),
             call,
         )
+
+    has_new_source_usage = any(
+        usage.token_source == "source_reported" for usage in data.token_usage
+    )
+    if has_new_source_usage:
+        _delete_fallback_usage(repository, session_id)
+    existing_source_usage = _has_source_reported_usage(repository, session_id)
+
     for usage in data.token_usage:
-        repository.insert_token_usage(
+        if usage.token_source == "tiktoken_estimate" and existing_source_usage:
+            continue
+        _insert_token_usage(
+            repository,
             session_id,
             turn_ids.get(usage.turn_external_id or ""),
             usage,

@@ -8,13 +8,14 @@ version = "0.1.0"
 description = "Local-first observability and analytics for agent execution histories"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["typer>=0.12"]
+dependencies = ["typer>=0.12", "tiktoken>=0.7"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
 [project.scripts]
-agentscope = "agentscope.cli:app"
+agentscope = "agentscope.entrypoint:app"
+agentscope-codex-origin = "agentscope.diagnostics.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]

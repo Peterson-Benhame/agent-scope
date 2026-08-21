@@ -3,17 +3,25 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agentscope.analytics.dashboard import DashboardAnalyticsService
 from agentscope.analytics.filters import AnalyticsFilter
-from agentscope.analytics.service import AnalyticsService
+from agentscope.billing import billing_semantics
+from agentscope.codex_account.storage import CodexAccountStorage
 from agentscope.extension.contracts import (
     SNAPSHOT_SCHEMA,
     SNAPSHOT_VERSION,
+    AvailabilityItem,
+    SnapshotAvailability,
+    SnapshotBilling,
+    SnapshotCodexAccount,
+    SnapshotCodexCredits,
     SnapshotDimensions,
     SnapshotQuality,
     SnapshotSummary,
     to_dict,
 )
 from agentscope.storage.repository import Repository
+from agentscope.usage_context import ensure_usage_context_schema
 
 
 def _dimension_values(repository: Repository, table: str, expression: str) -> list[str]:
@@ -43,6 +51,49 @@ def _dimensions(repository: Repository) -> SnapshotDimensions:
     )
 
 
+def _freshness(repository: Repository) -> dict[str, object]:
+    with repository.database.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT MAX(last_imported_at) AS last_imported_at,
+                   COUNT(*) AS artifacts_tracked
+            FROM import_state
+            WHERE status='complete'
+            """
+        ).fetchone()
+    return {
+        "last_imported_at": (
+            str(row["last_imported_at"])
+            if row["last_imported_at"] is not None
+            else None
+        ),
+        "artifacts_tracked": int(row["artifacts_tracked"] or 0),
+    }
+
+
+def _codex_account(repository: Repository) -> dict[str, object]:
+    snapshot = CodexAccountStorage(repository.database).latest_account_snapshot()
+    if snapshot is None:
+        return {"available": False}
+    return to_dict(
+        SnapshotCodexAccount(
+            available=True,
+            captured_at=snapshot.captured_at,
+            plan_type=snapshot.plan_type,
+            primary_used_percent=snapshot.primary_used_percent,
+            primary_resets_at=snapshot.primary_resets_at,
+            secondary_used_percent=snapshot.secondary_used_percent,
+            secondary_resets_at=snapshot.secondary_resets_at,
+            credits=SnapshotCodexCredits(
+                has_credits=snapshot.credits_has_credits,
+                balance=snapshot.credits_balance,
+                unlimited=snapshot.credits_unlimited,
+            ),
+            spend_control_reached=snapshot.spend_control_reached,
+        )
+    )
+
+
 def _identity_confidence(repository: Repository) -> dict[str, int]:
     with repository.database.connect() as conn:
         rows = conn.execute(
@@ -64,11 +115,12 @@ def _scope_clauses(
 ) -> tuple[list[str], list[object]]:
     clauses: list[str] = []
     params: list[object] = []
+    local_day = filters.local_date_expression(date_expression)
     if filters.from_date is not None:
-        clauses.append(f"substr({date_expression}, 1, 10) >= ?")
+        clauses.append(f"{local_day} >= ?")
         params.append(filters.from_date.isoformat())
     if filters.to_date is not None:
-        clauses.append(f"substr({date_expression}, 1, 10) <= ?")
+        clauses.append(f"{local_day} <= ?")
         params.append(filters.to_date.isoformat())
     if filters.project is not None:
         clauses.append("p.name = ?")
@@ -95,7 +147,6 @@ def _tokens_without_model(repository: Repository, filters: AnalyticsFilter) -> i
         model_expression="COALESCE(tm.name, sm.name)",
     )
     clauses.insert(0, "COALESCE(tu.model_id, s.model_id) IS NULL")
-
     with repository.database.connect() as conn:
         row = conn.execute(
             """
@@ -126,7 +177,6 @@ def _has_savings_evidence(repository: Repository, filters: AnalyticsFilter) -> b
         "OR c.cache_savings_usd IS NOT NULL "
         "OR c.total_savings_usd IS NOT NULL)",
     )
-
     optimization_clauses, optimization_params = _scope_clauses(
         filters,
         date_expression="op.timestamp",
@@ -136,7 +186,6 @@ def _has_savings_evidence(repository: Repository, filters: AnalyticsFilter) -> b
         0,
         "(op.compression_savings_usd IS NOT NULL OR op.cache_savings_usd IS NOT NULL)",
     )
-
     with repository.database.connect() as conn:
         cost_row = conn.execute(
             """
@@ -154,7 +203,6 @@ def _has_savings_evidence(repository: Repository, filters: AnalyticsFilter) -> b
         ).fetchone()
         if int(cost_row["n"]) > 0:
             return True
-
         optimization_row = conn.execute(
             """
             SELECT COUNT(*) AS n
@@ -172,6 +220,13 @@ def _has_savings_evidence(repository: Repository, filters: AnalyticsFilter) -> b
     return int(optimization_row["n"]) > 0
 
 
+def _availability(value: float | None, reason: str) -> AvailabilityItem:
+    return AvailabilityItem(
+        available=value is not None,
+        reason=None if value is not None else reason,
+    )
+
+
 def build_extension_snapshot(
     repository: Repository,
     filters: AnalyticsFilter,
@@ -179,19 +234,43 @@ def build_extension_snapshot(
     period: str | None,
     database_path: Path,
 ) -> dict[str, object]:
-    analytics = AnalyticsService(repository, filters)
-    summary = analytics.summary()
-    quality = analytics.data_quality()
+    ensure_usage_context_schema(repository)
+    dashboard = DashboardAnalyticsService(repository, filters)
+    summary = dashboard.summary()
+    quality = dashboard.data_quality()
     optimization_confidence = quality.get("optimization_confidence", {})
     if not isinstance(optimization_confidence, dict):
         optimization_confidence = {}
-    savings = summary.total_savings_usd if _has_savings_evidence(repository, filters) else None
+
+    observed_cost = summary.observed_cost_usd
+    estimated_cost = summary.estimated_raw_cost_usd
+    known_estimated_cost = summary.known_estimated_raw_cost_usd
+    estimated_cost_events_total = summary.estimated_cost_events_total
+    estimated_cost_events_priced = summary.estimated_cost_events_priced
+    estimated_cost_coverage = (
+        estimated_cost_events_priced / estimated_cost_events_total
+        if estimated_cost_events_total
+        else 0.0
+    )
+    estimated_savings = (
+        summary.total_savings_usd
+        if _has_savings_evidence(repository, filters)
+        else None
+    )
+    availability = SnapshotAvailability(
+        observed_cost=_availability(observed_cost, "source_does_not_report_cost"),
+        estimated_cost=_availability(estimated_cost, "insufficient_pricing_data"),
+        estimated_savings=_availability(estimated_savings, "no_optimization_data"),
+    )
+    billing = billing_semantics(repository, filters)
 
     return {
         "schema": SNAPSHOT_SCHEMA,
         "version": SNAPSHOT_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "database": str(database_path),
+        "freshness": _freshness(repository),
+        "codex_account": _codex_account(repository),
         "filters": {
             "from": filters.from_date.isoformat() if filters.from_date else None,
             "to": filters.to_date.isoformat() if filters.to_date else None,
@@ -208,10 +287,32 @@ def build_extension_snapshot(
                 total_tokens=summary.total_tokens,
                 tokens_saved=summary.tokens_saved,
                 cache_ratio=summary.cache_ratio if summary.input_tokens else None,
-                observed_cost_usd=summary.observed_cost_usd,
-                estimated_savings_usd=savings,
+                observed_cost_usd=observed_cost,
+                estimated_cost_usd=estimated_cost,
+                known_estimated_cost_usd=known_estimated_cost,
+                estimated_cost_events_total=estimated_cost_events_total,
+                estimated_cost_events_priced=estimated_cost_events_priced,
+                estimated_cost_coverage=estimated_cost_coverage,
+                estimated_cost_complete=summary.estimated_cost_complete,
+                estimated_savings_usd=estimated_savings,
             )
         ),
+        "billing": to_dict(
+            SnapshotBilling(
+                mode=billing.mode,
+                confidence=billing.confidence,
+                estimated_cost_basis=billing.estimated_cost_basis,
+                is_observed_spend=billing.is_observed_spend,
+            )
+        ),
+        "availability": to_dict(availability),
+        "series": {"daily": dashboard.by_day()},
+        "breakdowns": {
+            "projects": dashboard.by_project(),
+            "models": dashboard.by_model(),
+            "sources": dashboard.by_source(),
+            "clients": dashboard.by_client(),
+        },
         "dimensions": to_dict(_dimensions(repository)),
         "quality": to_dict(
             SnapshotQuality(

@@ -25,15 +25,21 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     };
     webview.html = this.html(webview);
     webview.onDidReceiveMessage(async (message) => {
-      if (this.handler) {
-        await this.handler(message);
-      }
+      if (this.handler) await this.handler(message);
     });
-    void this.handler?.({ type: 'refresh' });
+    void this.handler?.({ type: 'load' });
   }
 
   setLoading(): void {
     void this.view?.webview.postMessage({ type: 'loading' });
+  }
+
+  setCodexSyncing(): void {
+    void this.view?.webview.postMessage({ type: 'codexSyncing' });
+  }
+
+  showCodexSyncError(message: string): void {
+    void this.view?.webview.postMessage({ type: 'codexSyncError', message });
   }
 
   update(snapshot: ExtensionSnapshot, filters: SnapshotFilters): void {
@@ -48,7 +54,13 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
   private html(webview: vscode.Webview): string {
     const nonce = crypto.randomBytes(16).toString('base64');
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'dashboard.js'));
+    const accountScriptUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', 'codex-account.js'),
+    );
     const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'dashboard.css'));
+    const accountStyleUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', 'codex-account.css'),
+    );
     const csp = [
       "default-src 'none'",
       `img-src ${webview.cspSource} data:`,
@@ -63,20 +75,29 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="${csp}">
   <link rel="stylesheet" href="${styleUri}">
+  <link rel="stylesheet" href="${accountStyleUri}">
   <title>AgentScope</title>
 </head>
 <body>
   <header class="toolbar">
-    <strong>AgentScope</strong>
+    <div class="brand">
+      <strong>AgentScope</strong>
+      <span>Uso, custo e eficiência local</span>
+    </div>
     <div class="toolbar-actions">
       <button id="select-database">Banco</button>
-      <button id="refresh">Atualizar</button>
+      <button id="refresh" class="primary">Atualizar</button>
     </div>
   </header>
   <section id="filters" class="filters" aria-label="Filtros"></section>
-  <section id="status" class="status">Carregando...</section>
-  <section id="cards" class="cards" aria-live="polite"></section>
+  <section id="status" class="status" aria-live="polite">Carregando...</section>
+  <section id="cards" class="cards" aria-label="Indicadores"></section>
+  <section id="codex-account" class="codex-account" aria-label="Conta Codex"></section>
+  <section id="trends" class="chart-grid" aria-label="Tendências"></section>
+  <section id="breakdowns" class="chart-grid" aria-label="Distribuições"></section>
+  <section id="notes" class="notes" aria-label="Disponibilidade dos dados"></section>
   <script nonce="${nonce}" src="${scriptUri}"></script>
+  <script nonce="${nonce}" src="${accountScriptUri}"></script>
 </body>
 </html>`;
   }

@@ -9,16 +9,23 @@ from typing import Optional
 import typer
 
 from agentscope.analytics.budget import calculate_budget_status
-from agentscope.analytics.filters import AnalyticsFilter, resolve_period
+from agentscope.analytics.filters import (
+    AnalyticsFilter,
+    current_local_utc_offset_minutes,
+    resolve_period,
+)
 from agentscope.analytics.service import AnalyticsService
 from agentscope.analytics.team_service import TeamAnalyticsService
 from agentscope.config import AgentScopeConfig
+from agentscope.costs.calculator import calculate_token_usage_costs
 from agentscope.extension.snapshot import build_extension_snapshot
+from agentscope.identity_backfill import backfill_local_identity
 from agentscope.importer import (
     ProgressEvent,
     collect_registered_sources,
     discover_registered_sources,
 )
+from agentscope.pricing.refresh import refresh_openai_pricing
 from agentscope.reporting.export import export_datasets
 from agentscope.reporting.html_report import generate_html_report
 from agentscope.reporting.team_html_report import generate_team_html_report
@@ -26,12 +33,21 @@ from agentscope.storage.database import Database
 from agentscope.storage.repository import Repository
 from agentscope.team.bundle import build_team_bundle
 from agentscope.team.importer import import_team_bundle
+from agentscope.usage_context_backfill import backfill_usage_context
 
 app = typer.Typer(help="Local-first observability and analytics for agent execution histories.")
 team_app = typer.Typer(help="Export, import and report sanitized team telemetry.")
 extension_app = typer.Typer(help="Machine-readable integration commands.")
+identity_app = typer.Typer(help="Identity maintenance commands.")
+usage_context_app = typer.Typer(help="Session product, client and billing context maintenance.")
+pricing_app = typer.Typer(help="Versioned model pricing catalog maintenance.")
+costs_app = typer.Typer(help="Estimated token usage cost maintenance.")
 app.add_typer(team_app, name="team")
 app.add_typer(extension_app, name="extension")
+app.add_typer(identity_app, name="identity")
+app.add_typer(usage_context_app, name="usage-context")
+app.add_typer(pricing_app, name="pricing")
+app.add_typer(costs_app, name="costs")
 
 
 def _render_collect_progress(event: ProgressEvent) -> None:
@@ -116,6 +132,17 @@ def _analytics_filter(
     )
 
 
+def _render_pricing_refresh(result) -> None:
+    fallback = "last_known_good" if result.used_last_known_good else "none"
+    typer.echo(
+        f"pricing_status={result.status} "
+        f"pricing_records_inserted={result.records_inserted} "
+        f"pricing_fallback={fallback}"
+    )
+    if result.error:
+        typer.echo(f"pricing_error={result.error}")
+
+
 @app.command()
 def collect(
     codex_home: Optional[Path] = typer.Option(None, "--codex-home"),
@@ -142,6 +169,136 @@ def collect(
     )
     for diagnostic in summary.diagnostics:
         typer.echo(f"diagnostic={diagnostic}")
+    pricing = refresh_openai_pricing(repo, force=False)
+    _render_pricing_refresh(pricing)
+    if summary.errors:
+        raise typer.Exit(code=1)
+
+
+@pricing_app.command("refresh")
+def pricing_refresh(
+    database: Optional[Path] = typer.Option(None, "--database"),
+    force: bool = typer.Option(False, "--force"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    config = AgentScopeConfig.from_env(database_path=database)
+    repo = _repository(config.database_path)
+    result = refresh_openai_pricing(repo, force=force)
+    if json_output:
+        typer.echo(
+            json.dumps(
+                asdict(result),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+        return
+    _render_pricing_refresh(result)
+
+
+@costs_app.command("calculate")
+def costs_calculate(
+    database: Optional[Path] = typer.Option(None, "--database"),
+    period: Optional[str] = typer.Option(None, "--period"),
+    from_value: Optional[str] = typer.Option(None, "--from"),
+    to_value: Optional[str] = typer.Option(None, "--to"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    config = AgentScopeConfig.from_env(database_path=database)
+    repo = _repository(config.database_path)
+    from_date = _parse_date(from_value, "--from")
+    to_date = _parse_date(to_value, "--to")
+    try:
+        resolved = resolve_period(period, from_date, to_date, today=date.today())
+    except ValueError as exc:
+        raise typer.BadParameter(
+            f"Período inválido: {period}. Use today, 7d, 30d ou month."
+        ) from exc
+    result = calculate_token_usage_costs(
+        repo,
+        utc_offset_minutes=current_local_utc_offset_minutes(),
+        from_date=resolved.from_date,
+        to_date=resolved.to_date,
+    )
+    if json_output:
+        typer.echo(
+            json.dumps(
+                asdict(result),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+        return
+    typer.echo(
+        f"events_scanned={result.events_scanned} "
+        f"events_priced={result.events_priced} "
+        f"events_unpriced={result.events_unpriced} complete={str(result.complete).lower()}"
+    )
+    for model, cost in sorted(result.by_model.items()):
+        typer.echo(f"model={model} estimated_cost_usd={cost:.6f}")
+    total = (
+        f"{result.total_estimated_cost_usd:.6f}"
+        if result.total_estimated_cost_usd is not None
+        else "unavailable"
+    )
+    typer.echo(f"total_estimated_cost_usd={total}")
+    for reason, count in sorted(result.unpriced_reasons.items()):
+        typer.echo(f"unpriced_reason={reason} events={count}")
+
+
+@identity_app.command("backfill")
+def identity_backfill(
+    database: Optional[Path] = typer.Option(None, "--database"),
+    source: Optional[str] = typer.Option(None, "--source"),
+    user_name: Optional[str] = typer.Option(None, "--user-name"),
+    machine_name: Optional[str] = typer.Option(None, "--machine-name"),
+) -> None:
+    config = AgentScopeConfig.from_env(
+        database_path=database,
+        enabled_sources={source} if source else None,
+        user_display_name=user_name,
+        machine_display_name=machine_name,
+    )
+    repo = _repository(config.database_path)
+    active_sources = frozenset({source}) if source else None
+    summary = backfill_local_identity(
+        repo,
+        config,
+        sources=active_sources,
+    )
+    typer.echo(
+        f"sessions_scanned={summary.sessions_scanned} "
+        f"sessions_updated={summary.sessions_updated} "
+        f"sessions_without_user={summary.sessions_without_user} "
+        f"sessions_without_machine={summary.sessions_without_machine} "
+        f"errors={summary.errors}"
+    )
+    if summary.errors:
+        raise typer.Exit(code=1)
+
+
+@usage_context_app.command("backfill")
+def usage_context_backfill(
+    database: Optional[Path] = typer.Option(None, "--database"),
+    source: str = typer.Option("codex", "--source"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    config = AgentScopeConfig.from_env(database_path=database)
+    repo = _repository(config.database_path)
+    summary = backfill_usage_context(repo, sources=frozenset({source}))
+    payload = asdict(summary)
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    else:
+        typer.echo(
+            f"sessions_scanned={summary.sessions_scanned} "
+            f"sessions_updated={summary.sessions_updated} "
+            f"sessions_existing={summary.sessions_existing} errors={summary.errors}"
+        )
+        for client, count in sorted(summary.clients.items()):
+            typer.echo(f"client={client} sessions={count}")
+        for billing_mode, count in sorted(summary.billing_modes.items()):
+            typer.echo(f"billing_mode={billing_mode} sessions={count}")
     if summary.errors:
         raise typer.Exit(code=1)
 

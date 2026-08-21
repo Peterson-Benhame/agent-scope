@@ -51,7 +51,7 @@ export class ExecFileProcessRunner implements ProcessRunner {
           if (error) {
             const enriched = error as NodeJS.ErrnoException & { killed?: boolean; code?: string | number };
             if (enriched.killed) {
-              reject(new SnapshotClientError('SNAPSHOT_TIMEOUT', 'AgentScope snapshot timed out.'));
+              reject(new SnapshotClientError('SNAPSHOT_TIMEOUT', 'AgentScope process timed out.'));
               return;
             }
             if (enriched.code === 'ENOENT') {
@@ -77,6 +77,17 @@ export interface AgentScopeClientOptions {
   databasePath?: string;
   timeoutMs?: number;
   runner?: ProcessRunner;
+}
+
+export interface CodexSyncResult {
+  account: Record<string, unknown>;
+  context: Record<string, unknown>;
+  costs: Record<string, unknown>;
+}
+
+export interface DerivedDataRefreshResult {
+  context: Record<string, unknown>;
+  costs: Record<string, unknown>;
 }
 
 export function buildSnapshotArgs(
@@ -116,6 +127,85 @@ export class AgentScopeClient {
     this.databasePath = options.databasePath || '';
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.runner = options.runner ?? new ExecFileProcessRunner();
+  }
+
+  private databaseArgs(): string[] {
+    return this.databasePath ? ['--database', this.databasePath] : [];
+  }
+
+  private async runJsonCommand(
+    args: readonly string[],
+    timeoutMs: number,
+  ): Promise<Record<string, unknown>> {
+    let result: ProcessResult;
+    try {
+      result = await this.runner.run(this.executablePath, args, timeoutMs);
+    } catch (error) {
+      if (error instanceof SnapshotClientError) throw error;
+      const candidate = error as NodeJS.ErrnoException & { killed?: boolean };
+      if (candidate?.code === 'ENOENT') {
+        throw new SnapshotClientError('AGENTSCOPE_NOT_FOUND', 'AgentScope executable was not found.');
+      }
+      if (candidate?.killed) {
+        throw new SnapshotClientError('SNAPSHOT_TIMEOUT', 'AgentScope process timed out.');
+      }
+      throw new SnapshotClientError('SNAPSHOT_PROCESS_ERROR', 'AgentScope process failed.');
+    }
+    if (result.exitCode !== 0) {
+      throw new SnapshotClientError(
+        'SNAPSHOT_PROCESS_ERROR',
+        'AgentScope maintenance process returned an error.',
+      );
+    }
+    try {
+      const parsed: unknown = JSON.parse(result.stdout);
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        throw new Error('not an object');
+      }
+      return parsed as Record<string, unknown>;
+    } catch {
+      throw new SnapshotClientError(
+        'SNAPSHOT_INVALID_JSON',
+        'AgentScope maintenance process returned invalid JSON.',
+      );
+    }
+  }
+
+  async refreshDerivedData(): Promise<DerivedDataRefreshResult> {
+    const timeoutMs = 30_000;
+    const context = await this.runJsonCommand(
+      [
+        'usage-context', 'backfill',
+        ...this.databaseArgs(),
+        '--source', 'codex',
+        '--json',
+      ],
+      timeoutMs,
+    );
+    const costs = await this.runJsonCommand(
+      [
+        'costs', 'calculate',
+        ...this.databaseArgs(),
+        '--json',
+      ],
+      timeoutMs,
+    );
+    return { context, costs };
+  }
+
+  async syncCodexAndRecalculate(): Promise<CodexSyncResult> {
+    const timeoutMs = 30_000;
+    const account = await this.runJsonCommand(
+      [
+        'codex-account', 'sync',
+        ...this.databaseArgs(),
+        '--timeout-seconds', '30',
+        '--json',
+      ],
+      timeoutMs,
+    );
+    const { context, costs } = await this.refreshDerivedData();
+    return { account, context, costs };
   }
 
   async snapshot(filters: SnapshotFilters): Promise<ExtensionSnapshot> {

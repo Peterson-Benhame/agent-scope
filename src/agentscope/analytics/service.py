@@ -25,6 +25,10 @@ class AnalyticsSummary:
     total_savings_usd: float = 0.0
     observed_cost_usd: float | None = None
     estimated_raw_cost_usd: float | None = None
+    known_estimated_raw_cost_usd: float | None = None
+    estimated_cost_events_total: int = 0
+    estimated_cost_events_priced: int = 0
+    estimated_cost_complete: bool = False
 
     @property
     def cache_ratio(self) -> float:
@@ -116,6 +120,51 @@ class AnalyticsService:
             params,
         ).fetchone()
         return int(row["n"])
+
+    def _estimated_cost_coverage(self, conn) -> dict[str, object]:
+        user_expr = "COALESCE(u.display_name, u.stable_key)"
+        machine_expr = "COALESCE(mc.display_name, mc.stable_key)"
+        where, params = self._where(
+            date_expression="tu.timestamp",
+            project_expression="p.name",
+            model_expression="COALESCE(tm.name, sm.name)",
+            source_expression="src.name",
+            user_expression=user_expr,
+            machine_expression=machine_expr,
+        )
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS events_total,
+                   COALESCE(SUM(
+                       CASE WHEN ec.estimated_raw_cost_usd IS NOT NULL THEN 1 ELSE 0 END
+                   ), 0) AS events_priced,
+                   SUM(ec.estimated_raw_cost_usd) AS known_estimated_cost_usd
+            FROM token_usage tu
+            JOIN sessions s ON s.id=tu.session_id
+            LEFT JOIN projects p ON p.id=s.project_id
+            LEFT JOIN models tm ON tm.id=tu.model_id
+            LEFT JOIN models sm ON sm.id=s.model_id
+            JOIN sources src ON src.id=s.source_id
+            LEFT JOIN users u ON u.id=s.user_id
+            LEFT JOIN machines mc ON mc.id=s.machine_id
+            LEFT JOIN costs ec
+              ON ec.event_key='token_usage_cost:' || CAST(tu.id AS TEXT)
+            """ + where,
+            params,
+        ).fetchone()
+        total = int(row["events_total"] or 0)
+        priced = int(row["events_priced"] or 0)
+        known = (
+            float(row["known_estimated_cost_usd"])
+            if row["known_estimated_cost_usd"] is not None
+            else None
+        )
+        return {
+            "events_total": total,
+            "events_priced": priced,
+            "known_estimated_cost_usd": known,
+            "complete": total > 0 and priced == total,
+        }
 
     def summary(self) -> AnalyticsSummary:
         user_expr = "COALESCE(u.display_name, u.stable_key)"
@@ -271,6 +320,7 @@ class AnalyticsService:
                 """ + cost_where,
                 cost_params,
             ).fetchone()
+            coverage = self._estimated_cost_coverage(conn)
 
         compression = (
             float(cost["compression_savings_usd"])
@@ -286,6 +336,13 @@ class AnalyticsService:
             float(cost["total_savings_usd"])
             if cost and cost["total_savings_usd"] is not None
             else compression + cache
+        )
+        known_estimated = coverage["known_estimated_cost_usd"]
+        complete = bool(coverage["complete"])
+        estimated_total = (
+            float(known_estimated)
+            if complete and known_estimated is not None
+            else None
         )
         return AnalyticsSummary(
             sessions=sessions,
@@ -303,7 +360,13 @@ class AnalyticsService:
             cache_savings_usd=cache,
             total_savings_usd=total_savings,
             observed_cost_usd=self._nullable_sum(cost, "observed_cost_usd"),
-            estimated_raw_cost_usd=self._nullable_sum(cost, "estimated_raw_cost_usd"),
+            estimated_raw_cost_usd=estimated_total,
+            known_estimated_raw_cost_usd=(
+                float(known_estimated) if known_estimated is not None else None
+            ),
+            estimated_cost_events_total=int(coverage["events_total"]),
+            estimated_cost_events_priced=int(coverage["events_priced"]),
+            estimated_cost_complete=complete,
         )
 
     def comparison(self) -> dict[str, float | None] | None:

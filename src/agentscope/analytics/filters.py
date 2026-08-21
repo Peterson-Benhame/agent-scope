@@ -1,7 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from datetime import date, timedelta
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime, timedelta
+
+
+def current_local_utc_offset_minutes() -> int:
+    """Return the host's current UTC offset in whole minutes."""
+    offset = datetime.now().astimezone().utcoffset()
+    return int(offset.total_seconds() // 60) if offset is not None else 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -13,6 +19,12 @@ class AnalyticsFilter:
     source: str | None = None
     user: str | None = None
     machine: str | None = None
+    utc_offset_minutes: int = field(default_factory=current_local_utc_offset_minutes)
+
+    def local_date_expression(self, expression: str) -> str:
+        """Build a SQLite expression that maps a UTC timestamp to the local day."""
+        modifier = f"{self.utc_offset_minutes:+d} minutes"
+        return f"date({expression}, '{modifier}')"
 
     def previous_period(self) -> "AnalyticsFilter | None":
         if self.from_date is None or self.to_date is None:

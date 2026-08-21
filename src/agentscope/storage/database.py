@@ -279,6 +279,102 @@ CREATE INDEX IF NOT EXISTS idx_team_event_provenance_event_key
 """
 
 
+SCHEMA_V4 = """
+CREATE TABLE IF NOT EXISTS model_pricing (
+    id INTEGER PRIMARY KEY,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    pricing_scope TEXT NOT NULL,
+    service_tier TEXT NOT NULL,
+    context_type TEXT NOT NULL,
+    input_per_1m_usd REAL,
+    cached_input_per_1m_usd REAL,
+    cache_write_per_1m_usd REAL,
+    output_per_1m_usd REAL,
+    valid_from TEXT NOT NULL,
+    valid_to TEXT,
+    valid_from_basis TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    source_version TEXT NOT NULL,
+    source_hash TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    record_key TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_model_pricing_lookup
+    ON model_pricing(provider, model, pricing_scope, service_tier, context_type, valid_from);
+"""
+
+
+SCHEMA_V6 = """
+CREATE TABLE IF NOT EXISTS codex_account_usage_snapshots (
+    id INTEGER PRIMARY KEY,
+    captured_at TEXT NOT NULL,
+    auth_mode TEXT,
+    plan_type TEXT,
+    limit_id TEXT,
+    limit_name TEXT,
+    primary_used_percent INTEGER,
+    primary_window_duration_mins INTEGER,
+    primary_resets_at INTEGER,
+    secondary_used_percent INTEGER,
+    secondary_window_duration_mins INTEGER,
+    secondary_resets_at INTEGER,
+    credits_has_credits INTEGER,
+    credits_balance TEXT,
+    credits_unlimited INTEGER,
+    spend_control_reached INTEGER,
+    individual_limit TEXT,
+    individual_used TEXT,
+    individual_remaining_percent INTEGER,
+    individual_resets_at INTEGER,
+    source TEXT NOT NULL DEFAULT 'codex_app_server',
+    status TEXT NOT NULL DEFAULT 'complete',
+    error_code TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_codex_account_usage_captured_at
+    ON codex_account_usage_snapshots(captured_at);
+
+CREATE TABLE IF NOT EXISTS codex_thread_usage_snapshots (
+    id INTEGER PRIMARY KEY,
+    captured_at TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    session_id INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
+    estimated_usage_credits_micros INTEGER,
+    estimated_usage_usd_micros INTEGER,
+    source TEXT NOT NULL DEFAULT 'codex_app_server',
+    status TEXT NOT NULL DEFAULT 'complete',
+    billing_route_available INTEGER NOT NULL DEFAULT 1,
+    billing_source TEXT NOT NULL DEFAULT 'unknown',
+    attribution_confidence TEXT NOT NULL DEFAULT 'unknown',
+    evidence_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_codex_thread_usage_thread_id
+    ON codex_thread_usage_snapshots(thread_id);
+CREATE INDEX IF NOT EXISTS idx_codex_thread_usage_session_id
+    ON codex_thread_usage_snapshots(session_id);
+CREATE INDEX IF NOT EXISTS idx_codex_thread_usage_captured_at
+    ON codex_thread_usage_snapshots(captured_at);
+
+CREATE TABLE IF NOT EXISTS codex_thread_usage_groups (
+    id INTEGER PRIMARY KEY,
+    thread_usage_snapshot_id INTEGER NOT NULL
+        REFERENCES codex_thread_usage_snapshots(id) ON DELETE CASCADE,
+    model TEXT,
+    reasoning_effort TEXT,
+    speed TEXT,
+    estimated_usage_credits_micros INTEGER NOT NULL,
+    net_new_input_tokens INTEGER,
+    cached_input_tokens INTEGER,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    total_tokens INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_codex_thread_usage_groups_snapshot
+    ON codex_thread_usage_groups(thread_usage_snapshot_id);
+"""
+
+
 class Database:
     def __init__(self, path: Path | str):
         self.path = Path(path)
@@ -331,6 +427,32 @@ class Database:
             ("Add team bundle provenance",),
         )
 
+    def _migrate_v4(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(SCHEMA_V4)
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_migrations(version, description) VALUES(4, ?)",
+            ("Add versioned model pricing catalog",),
+        )
+
+    def _migrate_v5(self, conn: sqlite3.Connection) -> None:
+        columns = self._columns(conn, "token_usage")
+        if "token_source" not in columns:
+            conn.execute(
+                "ALTER TABLE token_usage ADD COLUMN token_source TEXT NOT NULL "
+                "DEFAULT 'source_reported'"
+            )
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_migrations(version, description) VALUES(5, ?)",
+            ("Add token usage provenance",),
+        )
+
+    def _migrate_v6(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(SCHEMA_V6)
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_migrations(version, description) VALUES(6, ?)",
+            ("Add sanitized Codex account and thread usage snapshots",),
+        )
+
     def initialize(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA_V1)
@@ -340,3 +462,6 @@ class Database:
             )
             self._migrate_v2(conn)
             self._migrate_v3(conn)
+            self._migrate_v4(conn)
+            self._migrate_v5(conn)
+            self._migrate_v6(conn)

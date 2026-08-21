@@ -96,6 +96,17 @@ agentscope collect
 
 One user can therefore be associated with multiple machines without becoming multiple people in analytics.
 
+Sessions collected before identity support can be repaired explicitly without duplicating sessions:
+
+```powershell
+agentscope identity backfill `
+  --source codex `
+  --user-name "Peterson Benhame" `
+  --machine-name "Brain-Storm"
+```
+
+The command reprocesses supported historical artifacts with full-rescan semantics and reports `sessions_scanned`, `sessions_updated`, `sessions_without_user`, `sessions_without_machine` and `errors`. Running it again is idempotent. `agentscope collect --full-rescan` remains available for a general complete recoleta.
+
 ## Local CLI
 
 ```powershell
@@ -104,6 +115,7 @@ agentscope status
 agentscope analyze
 agentscope export
 agentscope report
+agentscope identity backfill
 ```
 
 `analyze`, `export` and `report` share these filters:
@@ -136,15 +148,39 @@ Explicit full local message export:
 agentscope export --full-content
 ```
 
-## VS Code Visual MVP
+## VS Code Dashboard
 
-The repository includes a local VS Code extension under `vscode-extension/`. The extension does not open SQLite directly. It calls the machine-readable AgentScope integration command and renders only allow-listed analytics metadata:
+The repository includes a local VS Code extension under `vscode-extension/`. The extension never opens SQLite directly. Python remains the source of truth and exposes the privacy-safe snapshot contract:
 
 ```powershell
 agentscope extension snapshot --json --period 7d
 ```
 
-The visual MVP provides an AgentScope Activity Bar entry with Dashboard, Fontes and Projetos views. The dashboard shows Sessions, Total tokens, Tokens saved, Cache ratio, Observed cost and Estimated savings, with filters for Today, 7 days, 30 days, Month, custom dates, project, model, source, user and machine.
+The extension snapshot schema is `agentscope-extension-snapshot`, version `2`. In addition to the filtered summary and dimensions, it exposes allow-listed daily series, project/model/source breakdowns, monetary availability reasons, and database freshness metadata. It does not expose prompt bodies, assistant responses, source code, tool payloads, raw provider metadata or provider file paths.
+
+The Activity Bar contains Dashboard, Fontes and Projetos views. Dashboard filters include Today, 7 days, 30 days, Month, custom dates, project, model, source, user and machine.
+
+Dashboard KPI cards:
+
+- Sessions;
+- Total tokens;
+- Tokens saved;
+- Cache ratio;
+- Observed cost;
+- Estimated cost;
+- Estimated savings.
+
+Dashboard charts:
+
+- Sessions by day;
+- Tokens by day;
+- Observed cost versus estimated savings by day;
+- Cache ratio trend;
+- Usage by project;
+- Usage by model;
+- Usage by source.
+
+The dashboard is responsive to narrow and wide VS Code panels. Monetary values that cannot be supported by the active source/filter remain `Não disponível` with an explanatory reason rather than being coerced to zero. The status line also shows the most recent successful collection timestamp from `import_state` plus the number of tracked artifacts, so snapshot generation time is not confused with data freshness.
 
 Development prerequisites:
 
@@ -168,11 +204,11 @@ agentscope.autoRefresh
 agentscope.autoRefreshIntervalSeconds
 ```
 
-`agentscope.databasePath` can be left empty to use the CLI default, or selected from the command `AgentScope: Select Database`. The `autoRefresh` settings are reserved configuration for a later operational increment; this MVP refreshes on open, filter changes, database selection, and explicit refresh.
+`agentscope.databasePath` can be left empty to use the CLI default, or selected from the command `AgentScope: Select Database`. The `autoRefresh` settings are reserved configuration for a later operational increment; this dashboard refreshes on open, filter changes, database selection, and explicit refresh.
 
 ## Number and cost formatting
 
-HTML reports use pt-BR presentation without changing SQLite precision:
+HTML reports and the VS Code dashboard use pt-BR presentation without changing SQLite precision:
 
 ```text
 integer:      1.465.312.344
@@ -347,8 +383,10 @@ Fixtures are synthetic and sanitized. Personal provider histories are not commit
 docs/specs/README.md
 docs/superpowers/specs/2026-08-18-multi-source-team-analytics-design.md
 docs/superpowers/specs/2026-08-19-vscode-visual-mvp-design.md
+docs/superpowers/specs/2026-08-19-vscode-dashboard-analytics-design.md
 docs/superpowers/plans/2026-08-18-agentscope-v2-roadmap.md
 docs/superpowers/plans/2026-08-19-vscode-visual-mvp.md
+docs/superpowers/plans/2026-08-19-vscode-dashboard-analytics.md
 docs/provider-support.md
 docs/team-bundle.md
 docs/team-analytics.md
@@ -356,4 +394,4 @@ docs/team-analytics.md
 
 ## Current boundaries
 
-AgentScope remains local-first and analytics-focused. It does not route prompts, choose models/agents, modify provider histories, expose a central HTTP ingestion server, score developer performance, or reconcile provider invoices. The current VS Code MVP is visual/read-only analytics; charts, `Collect now`, operational auto-refresh, team UI, VSIX packaging and Marketplace publication are deferred to later increments.
+AgentScope remains local-first and analytics-focused. It does not route prompts, choose models/agents, modify provider histories, expose a central HTTP ingestion server, score developer performance, or reconcile provider invoices. The current VS Code dashboard remains local/read-only analytics. `Collect now`, operational auto-refresh, Team UI, VSIX packaging and Marketplace publication are deferred to later increments.

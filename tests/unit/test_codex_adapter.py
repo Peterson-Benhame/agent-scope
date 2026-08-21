@@ -1,3 +1,4 @@
+import json
 import shutil
 from pathlib import Path
 
@@ -112,3 +113,59 @@ def test_codex_adapter_associates_explicit_local_identity(tmp_path):
         ).fetchone()
     assert row["user_name"] == "Dev A"
     assert row["machine_name"] == "Notebook A"
+
+
+def test_codex_adapter_persists_product_client_and_billing_context(tmp_path):
+    db, repo = make_repo(tmp_path)
+    home, _ = make_codex_home(tmp_path)
+    adapter = CodexAdapter()
+    discovery = adapter.discover(
+        DiscoveryContext(user_home=tmp_path, overrides={"codex": home})
+    )
+
+    result = adapter.collect(CollectRequest(repository=repo, discovery=discovery))
+
+    assert result.errors == 0
+    with db.connect() as conn:
+        row = conn.execute(
+            """
+            SELECT s.provider AS model_provider,
+                   uc.provider, uc.product, uc.client, uc.billing_mode,
+                   uc.client_confidence, uc.billing_confidence, uc.evidence_json
+            FROM sessions s
+            JOIN session_usage_context uc ON uc.session_id=s.id
+            WHERE s.external_session_id='session-1'
+            """
+        ).fetchone()
+
+    assert row["model_provider"] == "headroom"
+    assert row["provider"] == "openai"
+    assert row["product"] == "codex"
+    assert row["client"] == "vscode"
+    assert row["billing_mode"] == "unknown"
+    assert row["client_confidence"] == "explicit"
+    assert row["billing_confidence"] == "unknown"
+    assert json.loads(row["evidence_json"]) == [
+        "originator=codex_vscode",
+        "source=vscode",
+    ]
+
+
+def test_codex_usage_context_is_idempotent_on_full_rescan(tmp_path):
+    db, repo = make_repo(tmp_path)
+    home, _ = make_codex_home(tmp_path)
+    adapter = CodexAdapter()
+    discovery = adapter.discover(
+        DiscoveryContext(user_home=tmp_path, overrides={"codex": home})
+    )
+    request = CollectRequest(
+        repository=repo,
+        discovery=discovery,
+        full_rescan=True,
+    )
+
+    adapter.collect(request)
+    adapter.collect(request)
+
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM session_usage_context").fetchone()[0] == 1

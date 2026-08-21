@@ -8,6 +8,7 @@ import {
   applyFilterPatch,
   applyPeriod,
   createDefaultFilterState,
+  reconcileDimensionFilters,
   resetFilters,
 } from '../state/filterState';
 import { DashboardViewProvider } from '../views/dashboardViewProvider';
@@ -34,30 +35,66 @@ export class DashboardCoordinator {
     return { ...this.filters };
   }
 
-  async refresh(): Promise<void> {
-    const sequence = ++this.requestSequence;
+  private client(): AgentScopeClient {
     const settings = this.readSettings();
-    this.dashboard.setLoading();
-    const client = new AgentScopeClient({
+    return new AgentScopeClient({
       executablePath: settings.executablePath,
       databasePath: settings.databasePath,
     });
+  }
+
+  async refresh(): Promise<void> {
+    const sequence = ++this.requestSequence;
+    this.dashboard.setLoading();
+    const client = this.client();
 
     try {
       const snapshot = await client.snapshot(this.filters);
-      if (sequence !== this.requestSequence) {
-        return;
-      }
+      if (sequence !== this.requestSequence) return;
+      this.filters = reconcileDimensionFilters(this.filters, snapshot.dimensions);
       this.sources.setItems(snapshot.dimensions.sources);
       this.projects.setItems(snapshot.dimensions.projects);
       this.dashboard.update(snapshot, this.filters);
     } catch (error) {
-      if (sequence !== this.requestSequence) {
-        return;
-      }
+      if (sequence !== this.requestSequence) return;
       const mapped = this.mapError(error);
       this.output.appendLine(`[${mapped.code}] ${mapped.detail}`);
       this.dashboard.showError(mapped.code, mapped.message);
+    }
+  }
+
+  async refreshDerived(): Promise<void> {
+    this.dashboard.setLoading();
+    try {
+      const result = await this.client().refreshDerivedData();
+      this.output.appendLine(
+        `[DERIVED_REFRESH] context_updated=${String(result.context.sessions_updated ?? 'unknown')} ` +
+        `events_priced=${String(result.costs.events_priced ?? 'unknown')} ` +
+        `events_unpriced=${String(result.costs.events_unpriced ?? 'unknown')}`,
+      );
+      await this.refresh();
+    } catch (error) {
+      const mapped = this.mapError(error);
+      this.output.appendLine(`[${mapped.code}] ${mapped.detail}`);
+      this.dashboard.showError(mapped.code, mapped.message);
+    }
+  }
+
+  async syncCodex(): Promise<void> {
+    this.dashboard.setCodexSyncing();
+    try {
+      const result = await this.client().syncCodexAndRecalculate();
+      this.output.appendLine(
+        `[CODEX_SYNC] account=${String(result.account.status ?? 'unknown')} ` +
+        `context_updated=${String(result.context.sessions_updated ?? 'unknown')} ` +
+        `events_priced=${String(result.costs.events_priced ?? 'unknown')} ` +
+        `events_unpriced=${String(result.costs.events_unpriced ?? 'unknown')}`,
+      );
+      await this.refresh();
+    } catch (error) {
+      const mapped = this.mapError(error);
+      this.output.appendLine(`[${mapped.code}] ${mapped.detail}`);
+      this.dashboard.showCodexSyncError(mapped.message);
     }
   }
 
@@ -86,8 +123,8 @@ export class DashboardCoordinator {
       const messages: Record<string, string> = {
         AGENTSCOPE_NOT_FOUND: 'AgentScope não foi encontrado. Configure agentscope.executablePath.',
         DATABASE_NOT_FOUND: 'Banco AgentScope não encontrado. Selecione um arquivo de banco válido.',
-        SNAPSHOT_TIMEOUT: 'A leitura do AgentScope excedeu o tempo limite.',
-        SNAPSHOT_PROCESS_ERROR: 'O AgentScope não conseguiu gerar o snapshot.',
+        SNAPSHOT_TIMEOUT: 'A operação do AgentScope excedeu o tempo limite.',
+        SNAPSHOT_PROCESS_ERROR: 'O AgentScope não conseguiu concluir a operação.',
         SNAPSHOT_INVALID_JSON: 'O AgentScope retornou dados inválidos para a extensão.',
         SNAPSHOT_UNSUPPORTED_VERSION: 'A versão do AgentScope não é compatível com esta extensão.',
       };
