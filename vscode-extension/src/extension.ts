@@ -47,8 +47,11 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
     switch (message.type) {
-      case 'refresh':
+      case 'load':
         await coordinator.refresh();
+        return;
+      case 'refresh':
+        await coordinator.refreshDerived();
         return;
       case 'syncCodex':
         await coordinator.syncCodex();
@@ -90,7 +93,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await vscode.commands.executeCommand('agentscope.dashboard.focus');
     }),
     vscode.commands.registerCommand('agentscope.refreshDashboard', async () => {
-      await coordinator.refresh();
+      await coordinator.refreshDerived();
     }),
     vscode.commands.registerCommand('agentscope.selectDatabase', async () => {
       const selected = await vscode.window.showOpenDialog({
