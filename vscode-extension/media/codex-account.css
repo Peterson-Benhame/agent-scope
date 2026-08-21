@@ -18,7 +18,7 @@
 .codex-account-header {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   gap: 12px;
   flex-wrap: wrap;
 }
@@ -27,6 +27,24 @@
   margin: 0;
   font-size: 1rem;
   font-weight: 600;
+}
+
+.codex-account-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.codex-account-sync {
+  min-height: 30px;
+  padding: 5px 9px;
+}
+
+.codex-account-sync:disabled {
+  cursor: progress;
+  opacity: 0.7;
 }
 
 .codex-account-header span,
@@ -61,5 +79,10 @@
 @media (max-width: 520px) {
   .codex-account-grid {
     grid-template-columns: 1fr;
+  }
+
+  .codex-account-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 }
