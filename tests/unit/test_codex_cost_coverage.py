@@ -70,11 +70,11 @@ def _repo_with_codex_usage(tmp_path, model: str) -> Repository:
 @pytest.mark.parametrize(
     ("model", "expected_cost"),
     [
-        ("gpt-5.4", 3.55),
-        ("gpt-5.5", 7.10),
+        ("gpt-5.4", 6.35),
+        ("gpt-5.5", 12.70),
         ("gpt-5.4-mini", 1.065),
         ("gpt-5.3-codex", 2.835),
-        ("codex-auto-review", 3.55),
+        ("codex-auto-review", 6.35),
     ],
 )
 def test_codex_models_are_priced_after_context_backfill(tmp_path, model, expected_cost):
@@ -101,7 +101,7 @@ def test_codex_models_are_priced_after_context_backfill(tmp_path, model, expecte
             JOIN models m ON m.id=c.model_id
             WHERE c.event_key=?
             """,
-            (f"token_usage_cost:{1}",),
+            ("token_usage_cost:1",),
         ).fetchone()
 
     assert row is not None
@@ -128,4 +128,4 @@ def test_auto_review_keeps_activity_label_but_uses_gpt54_price_provenance(tmp_pa
         ).fetchone()
 
     assert row["local_model"] == "codex-auto-review"
-    assert "gpt-5-4" in str(row["pricing_version"]).lower()
+    assert "gpt-5.4" in str(row["pricing_version"]).lower()
