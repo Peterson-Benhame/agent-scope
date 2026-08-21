@@ -15,6 +15,9 @@ from agentscope.storage.repository import Repository
 
 
 _LONG_CONTEXT_INPUT_THRESHOLD = 272_000
+_PRICING_MODEL_ALIASES = {
+    "codex-auto-review": "gpt-5.4",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,6 +123,10 @@ def _classify_usage(row: dict[str, Any]) -> tuple[str | None, int, int, int, int
     return None, input_value, cached_value, cache_write_value, output_value
 
 
+def _pricing_model(local_model: str) -> str:
+    return _PRICING_MODEL_ALIASES.get(local_model, local_model)
+
+
 def _price_for_usage(
     catalog: PricingCatalog,
     row: dict[str, Any],
@@ -138,7 +145,7 @@ def _price_for_usage(
     context_type = "long" if input_tokens > _LONG_CONTEXT_INPUT_THRESHOLD else "short"
     return catalog.lookup(
         provider=provider,
-        model=model,
+        model=_pricing_model(model),
         pricing_scope=OPENAI_API_STANDARD_SCOPE,
         service_tier="standard",
         context_type=context_type,
