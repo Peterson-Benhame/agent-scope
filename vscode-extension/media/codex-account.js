@@ -1,6 +1,9 @@
 (() => {
+  const vscode = acquireVsCodeApi();
   const account = document.getElementById('codex-account');
   if (!account) return;
+
+  let syncButton;
 
   function detail(label, value, hint) {
     const item = document.createElement('div');
@@ -24,8 +27,16 @@
     return item;
   }
 
+  function setSyncState(syncing, errorMessage) {
+    if (!syncButton) return;
+    syncButton.disabled = syncing;
+    syncButton.textContent = syncing ? 'Sincronizando...' : 'Sincronizar Codex';
+    syncButton.title = errorMessage || '';
+  }
+
   function render(vm) {
     account.replaceChildren();
+    syncButton = undefined;
     const data = vm?.codexAccount;
     if (!data) return;
 
@@ -36,9 +47,21 @@
     header.className = 'codex-account-header';
     const heading = document.createElement('h2');
     heading.textContent = data.title;
+
+    const actions = document.createElement('div');
+    actions.className = 'codex-account-actions';
     const synced = document.createElement('span');
     synced.textContent = data.syncedAtLabel;
-    header.append(heading, synced);
+    syncButton = document.createElement('button');
+    syncButton.type = 'button';
+    syncButton.className = 'codex-account-sync';
+    syncButton.textContent = 'Sincronizar Codex';
+    syncButton.addEventListener('click', () => {
+      setSyncState(true);
+      vscode.postMessage({ type: 'syncCodex' });
+    });
+    actions.append(synced, syncButton);
+    header.append(heading, actions);
 
     const grid = document.createElement('div');
     grid.className = 'codex-account-grid';
@@ -63,8 +86,17 @@
       render(message.payload);
       return;
     }
+    if (message.type === 'codexSyncing') {
+      setSyncState(true);
+      return;
+    }
+    if (message.type === 'codexSyncError') {
+      setSyncState(false, message.message || 'Falha ao sincronizar Codex.');
+      return;
+    }
     if (message.type === 'loading' || message.type === 'error') {
       account.replaceChildren();
+      syncButton = undefined;
     }
   });
 })();
