@@ -76,3 +76,36 @@ describe('Codex dashboard synchronization', () => {
     assert.strictEqual(runner.calls.length, 1);
   });
 });
+
+describe('Dashboard derived-data refresh', () => {
+  it('backfills Codex context and recalculates costs without syncing the account', async () => {
+    const runner = new RecordingRunner();
+    const client = new AgentScopeClient({
+      executablePath: 'agentscope',
+      databasePath: 'C:/data/agentscope.db',
+      runner,
+    });
+
+    const result = await client.refreshDerivedData();
+
+    assert.deepStrictEqual(
+      runner.calls.map((call) => call.args),
+      [
+        [
+          'usage-context', 'backfill',
+          '--database', 'C:/data/agentscope.db',
+          '--source', 'codex',
+          '--json',
+        ],
+        [
+          'costs', 'calculate',
+          '--database', 'C:/data/agentscope.db',
+          '--json',
+        ],
+      ],
+    );
+    assert.strictEqual(result.context.errors, 0);
+    assert.strictEqual(result.costs.events_priced, 9);
+    assert.ok(runner.calls.every((call) => call.timeoutMs === 30_000));
+  });
+});
