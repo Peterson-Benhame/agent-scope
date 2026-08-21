@@ -42,6 +42,24 @@ export interface SnapshotFreshness {
   artifacts_tracked: number;
 }
 
+export interface SnapshotCodexCredits {
+  has_credits: boolean | null;
+  balance: string | null;
+  unlimited: boolean | null;
+}
+
+export interface SnapshotCodexAccount {
+  available: boolean;
+  captured_at?: string | null;
+  plan_type?: string | null;
+  primary_used_percent?: number | null;
+  primary_resets_at?: number | null;
+  secondary_used_percent?: number | null;
+  secondary_resets_at?: number | null;
+  credits?: SnapshotCodexCredits | null;
+  spend_control_reached?: boolean | null;
+}
+
 export type AvailabilityReason =
   | 'source_does_not_report_cost'
   | 'insufficient_pricing_data'
@@ -129,6 +147,7 @@ export interface ExtensionSnapshot {
   generated_at: string;
   database: string;
   freshness?: SnapshotFreshness;
+  codex_account?: SnapshotCodexAccount;
   filters: SnapshotFilters;
   summary: SnapshotSummary;
   billing: SnapshotBilling;
@@ -163,6 +182,18 @@ function isFiniteNumber(value: unknown): value is number {
 
 function isNumberOrNull(value: unknown): value is number | null {
   return value === null || isFiniteNumber(value);
+}
+
+function isOptionalNumberOrNull(value: unknown): boolean {
+  return value === undefined || isNumberOrNull(value);
+}
+
+function isOptionalStringOrNull(value: unknown): boolean {
+  return value === undefined || value === null || typeof value === 'string';
+}
+
+function isOptionalBooleanOrNull(value: unknown): boolean {
+  return value === undefined || value === null || typeof value === 'boolean';
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -203,6 +234,33 @@ function validateBilling(value: unknown): void {
     typeof value.is_observed_spend !== 'boolean'
   ) {
     invalid('Snapshot billing section is invalid.');
+  }
+}
+
+function validateCodexAccount(value: unknown): void {
+  if (!isRecord(value) || typeof value.available !== 'boolean') {
+    invalid('Snapshot Codex account section is invalid.');
+  }
+  if (
+    !isOptionalStringOrNull(value.captured_at) ||
+    !isOptionalStringOrNull(value.plan_type) ||
+    !isOptionalNumberOrNull(value.primary_used_percent) ||
+    !isOptionalNumberOrNull(value.primary_resets_at) ||
+    !isOptionalNumberOrNull(value.secondary_used_percent) ||
+    !isOptionalNumberOrNull(value.secondary_resets_at) ||
+    !isOptionalBooleanOrNull(value.spend_control_reached)
+  ) {
+    invalid('Snapshot Codex account fields are invalid.');
+  }
+  if (value.credits !== undefined && value.credits !== null) {
+    if (!isRecord(value.credits)) invalid('Snapshot Codex credits are invalid.');
+    if (
+      !isOptionalBooleanOrNull(value.credits.has_credits) ||
+      !isOptionalStringOrNull(value.credits.balance) ||
+      !isOptionalBooleanOrNull(value.credits.unlimited)
+    ) {
+      invalid('Snapshot Codex credits are invalid.');
+    }
   }
 }
 
@@ -332,6 +390,7 @@ export function parseExtensionSnapshot(value: unknown): ExtensionSnapshot {
     return invalid('Snapshot metadata is invalid.');
   }
   if (value.freshness !== undefined) validateFreshness(value.freshness);
+  if (value.codex_account !== undefined) validateCodexAccount(value.codex_account);
   if (
     !isRecord(value.filters) || !isRecord(value.summary) ||
     !isRecord(value.billing) || !isRecord(value.availability) || !isRecord(value.series) ||
