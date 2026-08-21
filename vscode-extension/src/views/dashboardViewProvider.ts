@@ -34,6 +34,14 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     void this.view?.webview.postMessage({ type: 'loading' });
   }
 
+  setCodexSyncing(): void {
+    void this.view?.webview.postMessage({ type: 'codexSyncing' });
+  }
+
+  showCodexSyncError(message: string): void {
+    void this.view?.webview.postMessage({ type: 'codexSyncError', message });
+  }
+
   update(snapshot: ExtensionSnapshot, filters: SnapshotFilters): void {
     const payload: DashboardViewModel = toDashboardViewModel(snapshot, filters);
     void this.view?.webview.postMessage({ type: 'snapshot', payload });
