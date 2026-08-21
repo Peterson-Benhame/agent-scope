@@ -1,5 +1,4 @@
 (() => {
-  const vscode = acquireVsCodeApi();
   const account = document.getElementById('codex-account');
   if (!account) return;
 
@@ -58,7 +57,7 @@
     syncButton.textContent = 'Sincronizar Codex';
     syncButton.addEventListener('click', () => {
       setSyncState(true);
-      vscode.postMessage({ type: 'syncCodex' });
+      window.dispatchEvent(new CustomEvent('agentscope:syncCodex'));
     });
     actions.append(synced, syncButton);
     header.append(heading, actions);
@@ -94,7 +93,7 @@
       setSyncState(false, message.message || 'Falha ao sincronizar Codex.');
       return;
     }
-    if (message.type === 'loading' || message.type === 'error') {
+    if (message.type === 'error') {
       account.replaceChildren();
       syncButton = undefined;
     }
