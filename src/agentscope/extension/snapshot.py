@@ -6,12 +6,15 @@ from pathlib import Path
 from agentscope.analytics.dashboard import DashboardAnalyticsService
 from agentscope.analytics.filters import AnalyticsFilter
 from agentscope.billing import billing_semantics
+from agentscope.codex_account.storage import CodexAccountStorage
 from agentscope.extension.contracts import (
     SNAPSHOT_SCHEMA,
     SNAPSHOT_VERSION,
     AvailabilityItem,
     SnapshotAvailability,
     SnapshotBilling,
+    SnapshotCodexAccount,
+    SnapshotCodexCredits,
     SnapshotDimensions,
     SnapshotQuality,
     SnapshotSummary,
@@ -66,6 +69,29 @@ def _freshness(repository: Repository) -> dict[str, object]:
         ),
         "artifacts_tracked": int(row["artifacts_tracked"] or 0),
     }
+
+
+def _codex_account(repository: Repository) -> dict[str, object]:
+    snapshot = CodexAccountStorage(repository.database).latest_account_snapshot()
+    if snapshot is None:
+        return {"available": False}
+    return to_dict(
+        SnapshotCodexAccount(
+            available=True,
+            captured_at=snapshot.captured_at,
+            plan_type=snapshot.plan_type,
+            primary_used_percent=snapshot.primary_used_percent,
+            primary_resets_at=snapshot.primary_resets_at,
+            secondary_used_percent=snapshot.secondary_used_percent,
+            secondary_resets_at=snapshot.secondary_resets_at,
+            credits=SnapshotCodexCredits(
+                has_credits=snapshot.credits_has_credits,
+                balance=snapshot.credits_balance,
+                unlimited=snapshot.credits_unlimited,
+            ),
+            spend_control_reached=snapshot.spend_control_reached,
+        )
+    )
 
 
 def _identity_confidence(repository: Repository) -> dict[str, int]:
@@ -244,6 +270,7 @@ def build_extension_snapshot(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "database": str(database_path),
         "freshness": _freshness(repository),
+        "codex_account": _codex_account(repository),
         "filters": {
             "from": filters.from_date.isoformat() if filters.from_date else None,
             "to": filters.to_date.isoformat() if filters.to_date else None,
