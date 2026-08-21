@@ -50,6 +50,9 @@ export function activate(context: vscode.ExtensionContext): void {
       case 'refresh':
         await coordinator.refresh();
         return;
+      case 'syncCodex':
+        await coordinator.syncCodex();
+        return;
       case 'selectDatabase':
         await vscode.commands.executeCommand('agentscope.selectDatabase');
         return;
