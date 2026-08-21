@@ -62,5 +62,25 @@ class SnapshotAvailability:
     estimated_savings: AvailabilityItem
 
 
+@dataclass(frozen=True, slots=True)
+class SnapshotCodexCredits:
+    has_credits: bool | None
+    balance: str | None
+    unlimited: bool | None
+
+
+@dataclass(frozen=True, slots=True)
+class SnapshotCodexAccount:
+    available: bool
+    captured_at: str | None = None
+    plan_type: str | None = None
+    primary_used_percent: int | None = None
+    primary_resets_at: int | None = None
+    secondary_used_percent: int | None = None
+    secondary_resets_at: int | None = None
+    credits: SnapshotCodexCredits | None = None
+    spend_control_reached: bool | None = None
+
+
 def to_dict(value: Any) -> dict[str, Any]:
     return asdict(value)
