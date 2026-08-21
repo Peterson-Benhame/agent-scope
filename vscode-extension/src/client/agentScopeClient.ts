@@ -85,6 +85,11 @@ export interface CodexSyncResult {
   costs: Record<string, unknown>;
 }
 
+export interface DerivedDataRefreshResult {
+  context: Record<string, unknown>;
+  costs: Record<string, unknown>;
+}
+
 export function buildSnapshotArgs(
   filters: SnapshotFilters,
   databasePath = '',
@@ -166,17 +171,8 @@ export class AgentScopeClient {
     }
   }
 
-  async syncCodexAndRecalculate(): Promise<CodexSyncResult> {
+  async refreshDerivedData(): Promise<DerivedDataRefreshResult> {
     const timeoutMs = 30_000;
-    const account = await this.runJsonCommand(
-      [
-        'codex-account', 'sync',
-        ...this.databaseArgs(),
-        '--timeout-seconds', '30',
-        '--json',
-      ],
-      timeoutMs,
-    );
     const context = await this.runJsonCommand(
       [
         'usage-context', 'backfill',
@@ -194,6 +190,21 @@ export class AgentScopeClient {
       ],
       timeoutMs,
     );
+    return { context, costs };
+  }
+
+  async syncCodexAndRecalculate(): Promise<CodexSyncResult> {
+    const timeoutMs = 30_000;
+    const account = await this.runJsonCommand(
+      [
+        'codex-account', 'sync',
+        ...this.databaseArgs(),
+        '--timeout-seconds', '30',
+        '--json',
+      ],
+      timeoutMs,
+    );
+    const { context, costs } = await this.refreshDerivedData();
     return { account, context, costs };
   }
 
