@@ -27,7 +27,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     webview.onDidReceiveMessage(async (message) => {
       if (this.handler) await this.handler(message);
     });
-    void this.handler?.({ type: 'refresh' });
+    void this.handler?.({ type: 'load' });
   }
 
   setLoading(): void {
